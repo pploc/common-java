@@ -10,6 +10,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.ApplicationContext;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
@@ -23,13 +24,16 @@ import java.util.concurrent.TimeUnit;
 @AutoConfiguration
 @ConditionalOnClass(Server.class)
 @Import({GrpcMethodRegistry.class, MetricsInterceptor.class})
+@EnableConfigurationProperties(GrpcProperties.class)
 public class GrpcServerAutoConfig {
     private static final Logger log = LoggerFactory.getLogger(GrpcServerAutoConfig.class);
 
+    private final GrpcProperties grpcProperties;
     private Server server;
 
-    @Value("${grpc.server.port:9090}")
-    private int port;
+    public GrpcServerAutoConfig(GrpcProperties grpcProperties) {
+        this.grpcProperties = grpcProperties;
+    }
 
     @Bean
     public AuthServerInterceptor authServerInterceptor(GrpcMethodRegistry registry) {
@@ -76,7 +80,7 @@ public class GrpcServerAutoConfig {
             log.info("Registered gRPC service: {}", service.getClass().getSimpleName());
         }
 
-        ServerBuilder<?> builder = ServerBuilder.forPort(port)
+        ServerBuilder<?> builder = ServerBuilder.forPort(grpcProperties.getPort())
                 .addService(ProtoReflectionService.newInstance());
 
         services.forEach(builder::addService);
@@ -88,7 +92,7 @@ public class GrpcServerAutoConfig {
     public void start() throws IOException {
         if (server != null) {
             server.start();
-            log.info("gRPC server started on port {}", port);
+            log.info("gRPC server started on port {}", grpcProperties.getPort());
             Thread awaitThread = new Thread(() -> {
                 try {
                     server.awaitTermination();
@@ -106,7 +110,7 @@ public class GrpcServerAutoConfig {
     public void stop() throws InterruptedException {
         if (server != null) {
             log.info("Shutting down gRPC server...");
-            server.shutdown().awaitTermination(15, TimeUnit.SECONDS);
+            server.shutdown().awaitTermination(grpcProperties.getShutdownTimeout().toSeconds(), TimeUnit.SECONDS);
             log.info("gRPC server shut down complete");
         }
     }

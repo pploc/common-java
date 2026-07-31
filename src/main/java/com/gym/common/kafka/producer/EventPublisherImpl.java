@@ -3,6 +3,7 @@ package com.gym.common.kafka.producer;
 import com.google.protobuf.Message;
 import com.gym.common.error.EventPublishFailedException;
 import com.gym.common.kafka.message.EventEnvelope;
+import com.gym.common.kafka.config.KafkaEventProperties;
 import io.opentelemetry.api.trace.Span;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.header.internals.RecordHeader;
@@ -26,15 +27,15 @@ public class EventPublisherImpl implements EventPublisher {
 
     private final KafkaTemplate<String, Object> kafkaTemplate;
     private final String applicationName;
-    private final Duration publishTimeout;
+    private final KafkaEventProperties kafkaEventProperties;
 
     public EventPublisherImpl(
             KafkaTemplate<String, Object> kafkaTemplate,
             @Value("${spring.application.name:unknown-service}") String applicationName,
-            @Value("${spring.kafka.producer.timeout:25000}") long timeoutMs) {
+            KafkaEventProperties kafkaEventProperties) {
         this.kafkaTemplate = kafkaTemplate;
         this.applicationName = applicationName;
-        this.publishTimeout = Duration.ofMillis(timeoutMs);
+        this.kafkaEventProperties = kafkaEventProperties;
     }
 
     @Override
@@ -70,7 +71,7 @@ public class EventPublisherImpl implements EventPublisher {
             }
         });
 
-        long timeoutMs = publishTimeout.toMillis();
+        long timeoutMs = kafkaEventProperties.getPublishTimeout().toMillis();
         try {
             kafkaTemplate.send(record).get(timeoutMs, TimeUnit.MILLISECONDS);
             log.info("Published event type {} to {}", eventType, topic);
