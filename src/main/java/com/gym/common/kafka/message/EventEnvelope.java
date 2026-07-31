@@ -1,5 +1,7 @@
 package com.gym.common.kafka.message;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.annotation.JsonSerialize;
 import com.google.protobuf.Message;
 import com.google.protobuf.util.JsonFormat;

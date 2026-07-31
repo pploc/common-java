@@ -1,3 +1,4 @@
 com.gym.common.grpc.config.GrpcServerAutoConfig
 com.gym.common.kafka.config.KafkaAutoConfig
 com.gym.common.config.CommonAutoConfiguration
+com.gym.common.config.WebCommonConfig
