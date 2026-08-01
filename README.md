@@ -4,8 +4,8 @@ Shared Java library for the gym-chain microservices. Built with Java 26 and Spri
 
 ## Features
 
-### 1. gRPC Server Auto-Configuration & Interceptors
-Automatically detects and registers all `BindableService` beans. Wraps them with standard interceptors:
+### 1. gRPC Auto-Configured Interceptors
+Auto-configures standard gRPC server interceptor beans for microservices:
 - **Tracing**: Integrates OpenTelemetry span propagation.
 - **Logging**: Captures request start, end, status, and duration using MDC trace ID context.
 - **Metrics**: Records call latency and completions using Micrometer.

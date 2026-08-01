@@ -2,6 +2,7 @@ package com.gym.common.kafka.message;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.annotation.JsonDeserialize;
 import com.fasterxml.jackson.databind.annotation.JsonSerialize;
 import com.google.protobuf.Message;
 import com.google.protobuf.util.JsonFormat;
@@ -11,6 +12,7 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 @JsonSerialize(using = EventEnvelopeSerializer.class)
+@JsonDeserialize(using = EventEnvelopeDeserializer.class)
 public record EventEnvelope<T extends Message>(
     String eventType,
     String key,

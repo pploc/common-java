@@ -2,6 +2,7 @@ package com.gym.common.kafka.config;
 
 import lombok.RequiredArgsConstructor;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
+import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.header.Headers;
@@ -79,24 +80,7 @@ public class KafkaAutoConfig {
         DeadLetterPublishingRecoverer recoverer = new DeadLetterPublishingRecoverer(kafkaTemplate,
                 (record, exception) -> new TopicPartition(record.topic() + kafkaEventProperties.getDlq().getSuffix(), record.partition()));
 
-        recoverer.setHeadersFunction((record, exception) -> {
-            Headers headers = new RecordHeaders();
-            headers.add(HEADER_ORIGINAL_TOPIC, record.topic().getBytes(StandardCharsets.UTF_8));
-            
-            String excMsg = exception.getCause() != null && exception.getCause().getMessage() != null
-                    ? exception.getCause().getMessage()
-                    : (exception.getMessage() != null ? exception.getMessage() : "Unknown error");
-            headers.add(HEADER_EXCEPTION_MESSAGE, excMsg.getBytes(StandardCharsets.UTF_8));
-            headers.add(HEADER_FAILED_AT, String.valueOf(Instant.now().toEpochMilli()).getBytes(StandardCharsets.UTF_8));
-
-            int attempt = 1;
-            org.apache.kafka.common.header.Header countHeader = record.headers().lastHeader(HEADER_RETRY_COUNT);
-            if (countHeader != null && countHeader.value() != null) {
-                attempt = java.lang.Integer.parseInt(new String(countHeader.value(), StandardCharsets.UTF_8)) + 1;
-            }
-            headers.add(HEADER_RETRY_COUNT, String.valueOf(attempt).getBytes(StandardCharsets.UTF_8));
-            return headers;
-        });
+        recoverer.setHeadersFunction(KafkaAutoConfig::createDlqHeaders);
 
         // Exponential backoff configured from properties
         ExponentialBackOff backOff = new ExponentialBackOff(
@@ -107,6 +91,25 @@ public class KafkaAutoConfig {
         backOff.setMaxElapsedTime(kafkaEventProperties.getBackoff().getMaxElapsedTime().toMillis());
 
         return new DefaultErrorHandler(recoverer, backOff);
+    }
+
+    public static Headers createDlqHeaders(ConsumerRecord<?, ?> record, Exception exception) {
+        Headers headers = new RecordHeaders();
+        headers.add(HEADER_ORIGINAL_TOPIC, record.topic().getBytes(StandardCharsets.UTF_8));
+
+        String excMsg = exception.getCause() != null && exception.getCause().getMessage() != null
+                ? exception.getCause().getMessage()
+                : (exception.getMessage() != null ? exception.getMessage() : "Unknown error");
+        headers.add(HEADER_EXCEPTION_MESSAGE, excMsg.getBytes(StandardCharsets.UTF_8));
+        headers.add(HEADER_FAILED_AT, String.valueOf(Instant.now().toEpochMilli()).getBytes(StandardCharsets.UTF_8));
+
+        int attempt = 1;
+        org.apache.kafka.common.header.Header countHeader = record.headers().lastHeader(HEADER_RETRY_COUNT);
+        if (countHeader != null && countHeader.value() != null) {
+            attempt = Integer.parseInt(new String(countHeader.value(), StandardCharsets.UTF_8)) + 1;
+        }
+        headers.add(HEADER_RETRY_COUNT, String.valueOf(attempt).getBytes(StandardCharsets.UTF_8));
+        return headers;
     }
 
     @Bean

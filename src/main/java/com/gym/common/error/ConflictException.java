@@ -5,7 +5,15 @@ public class ConflictException extends DomainException {
         super(CommonErrorCode.DATA_INTEGRITY_VIOLATION, message);
     }
 
+    public ConflictException(String message, Throwable cause) {
+        super(CommonErrorCode.DATA_INTEGRITY_VIOLATION, message, cause);
+    }
+
     public ConflictException(ErrorCode errorCode, String message) {
         super(errorCode, message);
+    }
+
+    public ConflictException(ErrorCode errorCode, String message, Throwable cause) {
+        super(errorCode, message, cause);
     }
 }

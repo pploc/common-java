@@ -28,7 +28,7 @@ public class CursorUtils {
     public static String encodeCompound(Object... parts) {
         if (parts == null || parts.length == 0) return null;
         String raw = Arrays.stream(parts)
-                .map(p -> p != null ? p.toString() : "")
+                .map(p -> p != null ? ENCODER.encodeToString(p.toString().getBytes(StandardCharsets.UTF_8)) : "")
                 .collect(Collectors.joining(","));
         return encode(raw);
     }
@@ -36,7 +36,20 @@ public class CursorUtils {
     public static String[] decodeCompound(String cursor) {
         String decoded = decode(cursor);
         if (decoded == null) return new String[0];
-        return decoded.split(",", -1);
+        String[] segments = decoded.split(",", -1);
+        String[] result = new String[segments.length];
+        for (int i = 0; i < segments.length; i++) {
+            if (segments[i].isEmpty()) {
+                result[i] = "";
+            } else {
+                try {
+                    result[i] = new String(DECODER.decode(segments[i]), StandardCharsets.UTF_8);
+                } catch (IllegalArgumentException e) {
+                    result[i] = segments[i];
+                }
+            }
+        }
+        return result;
     }
 }
 

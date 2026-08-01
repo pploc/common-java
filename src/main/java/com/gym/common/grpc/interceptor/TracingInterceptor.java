@@ -59,9 +59,48 @@ public class TracingInterceptor implements ServerInterceptor {
             }
         };
 
+        ServerCall.Listener<ReqT> delegateListener;
         try (Scope scope = span.makeCurrent()) {
-            return Contexts.interceptCall(newGrpcContext, tracingCall, headers, next);
+            delegateListener = Contexts.interceptCall(newGrpcContext, tracingCall, headers, next);
         }
+
+        return new ForwardingServerCallListener.SimpleForwardingServerCallListener<>(delegateListener) {
+            @Override
+            public void onMessage(ReqT message) {
+                try (Scope scope = span.makeCurrent()) {
+                    super.onMessage(message);
+                }
+            }
+
+            @Override
+            public void onHalfClose() {
+                try (Scope scope = span.makeCurrent()) {
+                    super.onHalfClose();
+                }
+            }
+
+            @Override
+            public void onCancel() {
+                try (Scope scope = span.makeCurrent()) {
+                    super.onCancel();
+                }
+            }
+
+            @Override
+            public void onComplete() {
+                try (Scope scope = span.makeCurrent()) {
+                    super.onComplete();
+                }
+            }
+
+            @Override
+            public void onReady() {
+                try (Scope scope = span.makeCurrent()) {
+                    super.onReady();
+                }
+            }
+        };
     }
 }
+
 

@@ -15,6 +15,7 @@ import org.springframework.stereotype.Component;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
@@ -48,6 +49,9 @@ public class EventPublisherImpl implements EventPublisher {
 
     @Override
     public void publish(String topic, String key, Message payload, Map<String, String> headers) {
+        Objects.requireNonNull(topic, "Topic cannot be null");
+        Objects.requireNonNull(payload, "Payload cannot be null");
+
         String traceId = Span.current().getSpanContext().getTraceId();
         long timestamp = Instant.now().toEpochMilli();
         String eventType = payload.getClass().getSimpleName();

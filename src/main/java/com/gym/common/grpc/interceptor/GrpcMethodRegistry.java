@@ -36,12 +36,24 @@ public class GrpcMethodRegistry implements ApplicationListener<ContextRefreshedE
             }
 
             for (Method method : implClass.getMethods()) {
+                if (method.isSynthetic()) {
+                    continue;
+                }
                 String fullMethodName = rpcNameToFullName.get(method.getName().toLowerCase());
-                if (fullMethodName != null) {
+                if (fullMethodName != null && isGrpcHandlerMethod(method)) {
                     cache.put(fullMethodName, method);
                 }
             }
         }
+    }
+
+    private static boolean isGrpcHandlerMethod(Method method) {
+        Class<?>[] paramTypes = method.getParameterTypes();
+        if (paramTypes.length == 0) {
+            return false;
+        }
+        Class<?> lastParam = paramTypes[paramTypes.length - 1];
+        return io.grpc.stub.StreamObserver.class.isAssignableFrom(lastParam);
     }
 
     public Method getJavaMethod(String fullMethodName) {

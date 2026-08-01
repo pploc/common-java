@@ -5,7 +5,15 @@ public class ForbiddenException extends DomainException {
         super(CommonErrorCode.ACCESS_DENIED, message);
     }
 
+    public ForbiddenException(String message, Throwable cause) {
+        super(CommonErrorCode.ACCESS_DENIED, message, cause);
+    }
+
     public ForbiddenException(ErrorCode errorCode, String message) {
         super(errorCode, message);
+    }
+
+    public ForbiddenException(ErrorCode errorCode, String message, Throwable cause) {
+        super(errorCode, message, cause);
     }
 }
