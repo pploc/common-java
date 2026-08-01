@@ -16,7 +16,7 @@ java {
 }
 
 tasks.withType(JavaCompile).configureEach {
-    options.release = 23
+    options.release = 26
 }
 
 bootJar {
@@ -110,10 +110,6 @@ jacoco {
 tasks.named('test') {
     useJUnitPlatform()
     failOnNoDiscoveredTests = false
-    finalizedBy jacocoTestReport
-    jacoco {
-        includes = ['com.gym.*']
-    }
 }
 
 jacocoTestReport {
