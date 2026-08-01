@@ -19,6 +19,8 @@ import org.springframework.kafka.config.ConcurrentKafkaListenerContainerFactory;
 import org.springframework.kafka.core.*;
 import org.springframework.kafka.listener.DeadLetterPublishingRecoverer;
 import org.springframework.kafka.listener.DefaultErrorHandler;
+import org.springframework.kafka.retrytopic.RetryTopicConfiguration;
+import org.springframework.kafka.retrytopic.RetryTopicConfigurationBuilder;
 import org.springframework.kafka.support.serializer.ErrorHandlingDeserializer;
 import org.springframework.kafka.support.serializer.JsonDeserializer;
 import org.springframework.kafka.support.serializer.JsonSerializer;
@@ -46,6 +48,9 @@ public class KafkaAutoConfig {
     @Value("${spring.kafka.bootstrap-servers:localhost:9092}")
     private String bootstrapServers;
 
+    @Value("${spring.kafka.consumer.group-id:ms-gym-member-group}")
+    private String defaultGroupId;
+
     @Bean
     public ProducerFactory<String, Object> producerFactory() {
         Map<String, Object> config = new HashMap<>();
@@ -67,6 +72,9 @@ public class KafkaAutoConfig {
     public ConsumerFactory<String, Object> consumerFactory() {
         Map<String, Object> config = new HashMap<>();
         config.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
+        config.put(ConsumerConfig.GROUP_ID_CONFIG, defaultGroupId);
+        config.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
+        config.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, false);
         config.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, ErrorHandlingDeserializer.class);
         config.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, ErrorHandlingDeserializer.class);
         config.put(ErrorHandlingDeserializer.KEY_DESERIALIZER_CLASS, StringDeserializer.class);
@@ -91,6 +99,22 @@ public class KafkaAutoConfig {
         backOff.setMaxElapsedTime(kafkaEventProperties.getBackoff().getMaxElapsedTime().toMillis());
 
         return new DefaultErrorHandler(recoverer, backOff);
+    }
+
+    @Bean
+    public RetryTopicConfiguration retryTopicConfiguration(KafkaTemplate<String, Object> kafkaTemplate) {
+        if (!kafkaEventProperties.getRetry().isEnabled()) {
+            return null;
+        }
+        return RetryTopicConfigurationBuilder.newInstance()
+                .maxAttempts(kafkaEventProperties.getRetry().getMaxAttempts())
+                .exponentialBackoff(
+                        kafkaEventProperties.getRetry().getInitialInterval().toMillis(),
+                        kafkaEventProperties.getRetry().getMultiplier(),
+                        kafkaEventProperties.getRetry().getMaxInterval().toMillis()
+                )
+                .useSingleTopicForSameIntervals()
+                .create(kafkaTemplate);
     }
 
     public static Headers createDlqHeaders(ConsumerRecord<?, ?> record, Exception exception) {
@@ -118,8 +142,8 @@ public class KafkaAutoConfig {
             DefaultErrorHandler errorHandler) {
         ConcurrentKafkaListenerContainerFactory<String, Object> factory = new ConcurrentKafkaListenerContainerFactory<>();
         factory.setConsumerFactory(consumerFactory);
+        factory.getContainerProperties().setAckMode(org.springframework.kafka.listener.ContainerProperties.AckMode.MANUAL_IMMEDIATE);
         factory.setCommonErrorHandler(errorHandler);
         return factory;
     }
 }
-
