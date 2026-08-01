@@ -15,6 +15,14 @@ public class EventEnvelopeDeserializer extends JsonDeserializer<EventEnvelope<?>
 
     private static final JsonFormat.Parser JSON_PARSER = JsonFormat.parser().ignoringUnknownFields();
     private static final Map<Class<?>, Method> NEW_BUILDER_CACHE = new ConcurrentHashMap<>();
+    private static final Map<String, Class<? extends Message>> DYNAMIC_PROTO_CACHE = new ConcurrentHashMap<>();
+    
+    private static final String[] DEFAULT_PROTO_PACKAGES = {
+            "com.gym.proto.events.v1.",
+            "com.gym.proto.member.v1.",
+            "com.gym.proto.payment.v1.",
+            "com.gym.proto.identity.v1."
+    };
 
     private final JavaType targetPayloadType;
 
@@ -48,11 +56,19 @@ public class EventEnvelopeDeserializer extends JsonDeserializer<EventEnvelope<?>
         String source = node.has("source") ? node.get("source").asText() : null;
 
         JsonNode payloadNode = node.get("payload");
-        Message payload = null;
+        if (payloadNode == null || payloadNode.isNull()) {
+            throw new JsonMappingException(p, "Payload cannot be null or empty for eventType: " + eventType);
+        }
 
-        if (payloadNode != null && !payloadNode.isNull() && targetPayloadType != null) {
-            Class<?> rawClass = targetPayloadType.getRawClass();
-            if (Message.class.isAssignableFrom(rawClass)) {
+        Object payload = null;
+
+        if (payloadNode != null && !payloadNode.isNull()) {
+            Class<?> rawClass = targetPayloadType != null ? targetPayloadType.getRawClass() : null;
+            if (rawClass == null || rawClass == Object.class) {
+                rawClass = resolveProtobufClassDynamic(eventType);
+            }
+
+            if (rawClass != null && Message.class.isAssignableFrom(rawClass)) {
                 try {
                     Class<? extends Message> msgClass = (Class<? extends Message>) rawClass;
                     Method newBuilderMethod = NEW_BUILDER_CACHE.computeIfAbsent(
@@ -71,9 +87,30 @@ public class EventEnvelopeDeserializer extends JsonDeserializer<EventEnvelope<?>
                 } catch (Exception e) {
                     throw new JsonMappingException(p, "Failed to deserialize Protobuf payload", e);
                 }
+            } else {
+                payload = payloadNode;
             }
         }
 
-        return new EventEnvelope<>(eventType, key, payload, timestamp, traceId, source);
+        return new EventEnvelope(eventType, key, (Message) payload, timestamp, traceId, source);
+    }
+
+    @SuppressWarnings("unchecked")
+    private Class<? extends Message> resolveProtobufClassDynamic(String eventType) {
+        if (eventType == null || eventType.isBlank()) {
+            return null;
+        }
+        return DYNAMIC_PROTO_CACHE.computeIfAbsent(eventType, name -> {
+            for (String pkg : DEFAULT_PROTO_PACKAGES) {
+                try {
+                    Class<?> clazz = Class.forName(pkg + name);
+                    if (Message.class.isAssignableFrom(clazz)) {
+                        return (Class<? extends Message>) clazz;
+                    }
+                } catch (ClassNotFoundException ignored) {
+                }
+            }
+            return null;
+        });
     }
 }
