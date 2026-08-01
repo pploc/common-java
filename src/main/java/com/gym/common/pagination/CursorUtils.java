@@ -2,10 +2,9 @@ package com.gym.common.pagination;
 
 import lombok.experimental.UtilityClass;
 import java.nio.charset.StandardCharsets;
-import java.util.Base64;
-import java.util.Objects;
-import java.util.stream.Collectors;
 import java.util.Arrays;
+import java.util.Base64;
+import java.util.stream.Collectors;
 
 @UtilityClass
 public class CursorUtils {
