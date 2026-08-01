@@ -3,6 +3,7 @@ plugins {
     id 'org.springframework.boot' version '4.1.0'
     id 'io.spring.dependency-management' version '1.1.6'
     id 'jacoco'
+    id 'maven-publish'
 }
 
 group = 'com.gym'
@@ -32,8 +33,26 @@ repositories {
     maven {
         url 'https://maven.pkg.github.com/pploc/gym-proto'
         credentials {
-            username = System.getenv("GITHUB_ACTOR") ?: project.findProperty("gpr.user")
+            username = System.getenv("GITHUB_ACTOR") ?: project.findProperty("gpr.user") ?: "pploc"
             password = System.getenv("GITHUB_TOKEN") ?: project.findProperty("gpr.key")
+        }
+    }
+}
+
+publishing {
+    publications {
+        gpr(MavenPublication) {
+            from components.java
+        }
+    }
+    repositories {
+        maven {
+            name = "GitHubPackages"
+            url = uri("https://maven.pkg.github.com/pploc/common-java")
+            credentials {
+                username = System.getenv("GITHUB_ACTOR") ?: project.findProperty("gpr.user") ?: "pploc"
+                password = System.getenv("GITHUB_TOKEN") ?: project.findProperty("gpr.key")
+            }
         }
     }
 }
