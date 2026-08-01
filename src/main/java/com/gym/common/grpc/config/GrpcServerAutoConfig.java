@@ -5,9 +5,8 @@ import io.grpc.*;
 import io.grpc.protobuf.services.ProtoReflectionService;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Value;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
@@ -21,19 +20,16 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
+@Slf4j
 @AutoConfiguration
 @ConditionalOnClass(Server.class)
 @Import({GrpcMethodRegistry.class, MetricsInterceptor.class})
 @EnableConfigurationProperties(GrpcProperties.class)
+@RequiredArgsConstructor
 public class GrpcServerAutoConfig {
-    private static final Logger log = LoggerFactory.getLogger(GrpcServerAutoConfig.class);
 
     private final GrpcProperties grpcProperties;
     private Server server;
-
-    public GrpcServerAutoConfig(GrpcProperties grpcProperties) {
-        this.grpcProperties = grpcProperties;
-    }
 
     @Bean
     public AuthServerInterceptor authServerInterceptor(GrpcMethodRegistry registry) {
@@ -115,3 +111,4 @@ public class GrpcServerAutoConfig {
         }
     }
 }
+

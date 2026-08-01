@@ -1,6 +1,6 @@
 plugins {
     id 'java-library'
-    id 'org.springframework.boot' version '4.0.0-M1'
+    id 'org.springframework.boot' version '4.1.0'
     id 'io.spring.dependency-management' version '1.1.6'
 }
 
@@ -11,6 +11,14 @@ java {
     toolchain {
         languageVersion = JavaLanguageVersion.of(26)
     }
+}
+
+bootJar {
+    enabled = false
+}
+
+jar {
+    enabled = true
 }
 
 repositories {
@@ -26,8 +34,9 @@ repositories {
 }
 
 dependencies {
+    api platform('org.springframework.boot:spring-boot-dependencies:4.1.0')
+
     api 'org.springframework.boot:spring-boot-starter'
-    api 'org.springframework.boot:spring-boot-starter-aop'
     api 'org.springframework.kafka:spring-kafka'
 
     api 'io.grpc:grpc-netty-shaded:1.68.0'
@@ -51,8 +60,11 @@ dependencies {
     compileOnly 'org.springframework.boot:spring-boot-starter-security'
     api 'com.fasterxml.jackson.core:jackson-databind'
 
-    compileOnly 'org.projectlombok:lombok:1.18.36'
-    annotationProcessor 'org.projectlombok:lombok:1.18.36'
+    compileOnly 'org.projectlombok:lombok'
+    annotationProcessor 'org.projectlombok:lombok'
+    testCompileOnly 'org.projectlombok:lombok'
+    testAnnotationProcessor 'org.projectlombok:lombok'
+
 
     testImplementation 'org.springframework.boot:spring-boot-starter-test'
     testImplementation 'io.grpc:grpc-testing:1.68.0'
@@ -61,4 +73,9 @@ dependencies {
     testImplementation 'org.testcontainers:junit-jupiter:1.20.1'
     testImplementation 'org.testcontainers:postgresql:1.20.1'
     testImplementation 'org.testcontainers:kafka:1.20.1'
+}
+
+tasks.named('test') {
+    useJUnitPlatform()
+    failOnNoDiscoveredTests = false
 }

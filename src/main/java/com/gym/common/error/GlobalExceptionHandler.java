@@ -3,12 +3,13 @@ package com.gym.common.error;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.ConstraintViolation;
 import jakarta.validation.ConstraintViolationException;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+
 import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -26,10 +27,10 @@ import org.springframework.web.method.annotation.MethodArgumentTypeMismatchExcep
 import org.springframework.web.servlet.NoHandlerFoundException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 
+@Slf4j
 @RestControllerAdvice
+@RequiredArgsConstructor
 public class GlobalExceptionHandler {
-
-  private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
 
   private static final String INTERNAL_ERROR_MESSAGE =
       "An unexpected error occurred. Quote the traceId when reporting this.";
@@ -37,10 +38,6 @@ public class GlobalExceptionHandler {
   private static final Set<String> REDACTED_FIELDS = Set.of("password", "secret", "token");
 
   private final ErrorResponseFactory errorResponses;
-
-  public GlobalExceptionHandler(ErrorResponseFactory errorResponses) {
-    this.errorResponses = errorResponses;
-  }
 
   @ExceptionHandler(DomainException.class)
   public ResponseEntity<ErrorResponse> handleDomainException(
@@ -243,8 +240,10 @@ public class GlobalExceptionHandler {
       return null;
     }
     String lowerCaseField = field == null ? "" : field.toLowerCase(Locale.ROOT);
-    if (REDACTED_FIELDS.stream().anyMatch(lowerCaseField::contains)) {
-      return "[redacted]";
+    for (String redacted : REDACTED_FIELDS) {
+      if (lowerCaseField.contains(redacted)) {
+        return "[redacted]";
+      }
     }
     String rendered = rejected.toString();
     return rendered.length() > MAX_REJECTED_VALUE_LENGTH
@@ -252,3 +251,4 @@ public class GlobalExceptionHandler {
         : rendered;
   }
 }
+

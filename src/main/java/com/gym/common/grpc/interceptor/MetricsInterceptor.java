@@ -4,16 +4,14 @@ import io.grpc.*;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
+import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 import java.util.concurrent.TimeUnit;
 
 @Component
+@RequiredArgsConstructor
 public class MetricsInterceptor implements ServerInterceptor {
     private final MeterRegistry registry;
-
-    public MetricsInterceptor(MeterRegistry registry) {
-        this.registry = registry;
-    }
 
     @Override
     public <ReqT, RespT> ServerCall.Listener<ReqT> interceptCall(
@@ -45,3 +43,4 @@ public class MetricsInterceptor implements ServerInterceptor {
         return next.startCall(metricsCall, headers);
     }
 }
+

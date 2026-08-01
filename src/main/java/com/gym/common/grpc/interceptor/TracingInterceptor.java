@@ -7,9 +7,13 @@ import io.opentelemetry.api.trace.Tracer;
 import io.opentelemetry.context.Context;
 import io.opentelemetry.context.Scope;
 import io.opentelemetry.context.propagation.TextMapGetter;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 public class TracingInterceptor implements ServerInterceptor {
     private static final Tracer tracer = GlobalOpenTelemetry.getTracer("com.gym.common.grpc");
+    private static final Map<String, Metadata.Key<String>> KEY_CACHE = new ConcurrentHashMap<>();
+
     private static final TextMapGetter<Metadata> getter = new TextMapGetter<>() {
         @Override
         public Iterable<String> keys(Metadata carrier) {
@@ -18,7 +22,10 @@ public class TracingInterceptor implements ServerInterceptor {
 
         @Override
         public String get(Metadata carrier, String key) {
-            return carrier.get(Metadata.Key.of(key, Metadata.ASCII_STRING_MARSHALLER));
+            if (key == null) return null;
+            Metadata.Key<String> metadataKey = KEY_CACHE.computeIfAbsent(
+                    key, k -> Metadata.Key.of(k, Metadata.ASCII_STRING_MARSHALLER));
+            return carrier.get(metadataKey);
         }
     };
 
@@ -57,3 +64,4 @@ public class TracingInterceptor implements ServerInterceptor {
         }
     }
 }
+

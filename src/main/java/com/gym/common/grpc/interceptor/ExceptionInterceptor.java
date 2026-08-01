@@ -3,11 +3,12 @@ package com.gym.common.grpc.interceptor;
 import com.gym.common.error.DomainException;
 import com.gym.common.error.ErrorCode;
 import io.grpc.*;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.extern.slf4j.Slf4j;
 
+@Slf4j
 public class ExceptionInterceptor implements ServerInterceptor {
-    private static final Logger log = LoggerFactory.getLogger(ExceptionInterceptor.class);
+    private static final Metadata.Key<String> ERROR_CODE_KEY =
+            Metadata.Key.of("x-error-code", Metadata.ASCII_STRING_MARSHALLER);
 
     @Override
     public <ReqT, RespT> ServerCall.Listener<ReqT> interceptCall(
@@ -56,7 +57,7 @@ public class ExceptionInterceptor implements ServerInterceptor {
                 default -> Status.Code.INTERNAL;
             };
             status = Status.fromCode(grpcCode).withDescription(de.getMessage());
-            trailers.put(Metadata.Key.of("x-error-code", Metadata.ASCII_STRING_MARSHALLER), code.code());
+            trailers.put(ERROR_CODE_KEY, code.code());
             log.warn("Domain exception in gRPC: code={}, message={}", code.code(), de.getMessage());
         } else {
             status = Status.INTERNAL.withDescription("Internal server error");
@@ -69,3 +70,4 @@ public class ExceptionInterceptor implements ServerInterceptor {
         }
     }
 }
+

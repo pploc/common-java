@@ -6,6 +6,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import java.util.UUID;
+import java.util.regex.Pattern;
 import org.slf4j.MDC;
 import org.springframework.web.filter.OncePerRequestFilter;
 
@@ -15,6 +16,7 @@ public class CorrelationIdFilter extends OncePerRequestFilter {
   public static final String MDC_KEY = "correlationId";
 
   private static final int MAX_LENGTH = 64;
+  private static final Pattern SANITIZE_PATTERN = Pattern.compile("[^A-Za-z0-9_.\\-]");
 
   public static String currentCorrelationId() {
     return MDC.get(MDC_KEY);
@@ -39,10 +41,11 @@ public class CorrelationIdFilter extends OncePerRequestFilter {
     if (inbound == null || inbound.isBlank()) {
       return UUID.randomUUID().toString();
     }
-    String cleaned = inbound.replaceAll("[^A-Za-z0-9_.\\-]", "");
+    String cleaned = SANITIZE_PATTERN.matcher(inbound).replaceAll("");
     if (cleaned.isEmpty()) {
       return UUID.randomUUID().toString();
     }
     return cleaned.length() > MAX_LENGTH ? cleaned.substring(0, MAX_LENGTH) : cleaned;
   }
 }
+

@@ -1,7 +1,9 @@
 package com.gym.common.pagination;
 
 import com.gym.proto.common.v1.PaginationResponse;
+import lombok.experimental.UtilityClass;
 
+@UtilityClass
 public class PageMapper {
     public static PaginationResponse toProtoResponse(CursorPage<?> page) {
         if (page == null) {
@@ -27,3 +29,4 @@ public class PageMapper {
                 .build();
     }
 }
+

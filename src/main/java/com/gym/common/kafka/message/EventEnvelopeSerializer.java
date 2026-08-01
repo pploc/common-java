@@ -8,6 +8,8 @@ import com.google.protobuf.util.JsonFormat;
 import java.io.IOException;
 
 public class EventEnvelopeSerializer extends JsonSerializer<EventEnvelope<?>> {
+    private static final JsonFormat.Printer JSON_PRINTER = JsonFormat.printer().omittingInsignificantWhitespace();
+
     @Override
     public void serialize(EventEnvelope<?> value, JsonGenerator gen, SerializerProvider serializers) throws IOException {
         gen.writeStartObject();
@@ -19,9 +21,7 @@ public class EventEnvelopeSerializer extends JsonSerializer<EventEnvelope<?>> {
 
         gen.writeFieldName("payload");
         if (value.payload() != null) {
-            String jsonPayload = JsonFormat.printer()
-                .omittingInsignificantWhitespace()
-                .print(value.payload());
+            String jsonPayload = JSON_PRINTER.print(value.payload());
             gen.writeRawValue(jsonPayload);
         } else {
             gen.writeNull();
@@ -29,3 +29,4 @@ public class EventEnvelopeSerializer extends JsonSerializer<EventEnvelope<?>> {
         gen.writeEndObject();
     }
 }
+

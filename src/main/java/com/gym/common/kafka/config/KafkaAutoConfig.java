@@ -1,5 +1,6 @@
 package com.gym.common.kafka.config;
 
+import lombok.RequiredArgsConstructor;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.common.TopicPartition;
@@ -31,13 +32,15 @@ import java.util.Map;
 @EnableKafka
 @ConditionalOnClass(KafkaTemplate.class)
 @EnableConfigurationProperties(KafkaEventProperties.class)
+@RequiredArgsConstructor
 public class KafkaAutoConfig {
 
-    private final KafkaEventProperties kafkaEventProperties;
+    public static final String HEADER_ORIGINAL_TOPIC = "x-original-topic";
+    public static final String HEADER_EXCEPTION_MESSAGE = "x-exception-message";
+    public static final String HEADER_FAILED_AT = "x-failed-at";
+    public static final String HEADER_RETRY_COUNT = "x-retry-count";
 
-    public KafkaAutoConfig(KafkaEventProperties kafkaEventProperties) {
-        this.kafkaEventProperties = kafkaEventProperties;
-    }
+    private final KafkaEventProperties kafkaEventProperties;
 
     @Value("${spring.kafka.bootstrap-servers:localhost:9092}")
     private String bootstrapServers;
@@ -78,18 +81,20 @@ public class KafkaAutoConfig {
 
         recoverer.setHeadersFunction((record, exception) -> {
             Headers headers = new RecordHeaders();
-            headers.add("x-original-topic", record.topic().getBytes(StandardCharsets.UTF_8));
-            headers.add("x-exception-message", exception.getCause() != null
-                    ? exception.getCause().getMessage().getBytes(StandardCharsets.UTF_8)
-                    : exception.getMessage().getBytes(StandardCharsets.UTF_8));
-            headers.add("x-failed-at", String.valueOf(Instant.now().toEpochMilli()).getBytes(StandardCharsets.UTF_8));
+            headers.add(HEADER_ORIGINAL_TOPIC, record.topic().getBytes(StandardCharsets.UTF_8));
+            
+            String excMsg = exception.getCause() != null && exception.getCause().getMessage() != null
+                    ? exception.getCause().getMessage()
+                    : (exception.getMessage() != null ? exception.getMessage() : "Unknown error");
+            headers.add(HEADER_EXCEPTION_MESSAGE, excMsg.getBytes(StandardCharsets.UTF_8));
+            headers.add(HEADER_FAILED_AT, String.valueOf(Instant.now().toEpochMilli()).getBytes(StandardCharsets.UTF_8));
 
             int attempt = 1;
-            org.apache.kafka.common.header.Header countHeader = record.headers().lastHeader("x-retry-count");
-            if (countHeader != null) {
+            org.apache.kafka.common.header.Header countHeader = record.headers().lastHeader(HEADER_RETRY_COUNT);
+            if (countHeader != null && countHeader.value() != null) {
                 attempt = java.lang.Integer.parseInt(new String(countHeader.value(), StandardCharsets.UTF_8)) + 1;
             }
-            headers.add("x-retry-count", String.valueOf(attempt).getBytes(StandardCharsets.UTF_8));
+            headers.add(HEADER_RETRY_COUNT, String.valueOf(attempt).getBytes(StandardCharsets.UTF_8));
             return headers;
         });
 
@@ -114,3 +119,4 @@ public class KafkaAutoConfig {
         return factory;
     }
 }
+

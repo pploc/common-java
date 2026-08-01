@@ -1,5 +1,8 @@
 package com.gym.common.error;
 
+import lombok.Getter;
+
+@Getter
 public abstract class DomainException extends RuntimeException {
     private final ErrorCode errorCode;
 
@@ -17,3 +20,4 @@ public abstract class DomainException extends RuntimeException {
         return errorCode;
     }
 }
+

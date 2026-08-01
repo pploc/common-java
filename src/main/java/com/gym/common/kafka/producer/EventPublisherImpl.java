@@ -5,25 +5,28 @@ import com.gym.common.error.EventPublishFailedException;
 import com.gym.common.kafka.message.EventEnvelope;
 import com.gym.common.kafka.config.KafkaEventProperties;
 import io.opentelemetry.api.trace.Span;
+import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.header.internals.RecordHeader;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Component;
 
 import java.nio.charset.StandardCharsets;
-import java.time.Duration;
 import java.time.Instant;
 import java.util.Map;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
+@Slf4j
 @Component
 public class EventPublisherImpl implements EventPublisher {
-    private static final Logger log = LoggerFactory.getLogger(EventPublisherImpl.class);
+
+    public static final String HEADER_EVENT_TYPE = "x-event-type";
+    public static final String HEADER_TRACE_ID = "x-trace-id";
+    public static final String HEADER_SOURCE = "x-source";
+    public static final String HEADER_TIMESTAMP = "x-timestamp";
 
     private final KafkaTemplate<String, Object> kafkaTemplate;
     private final String applicationName;
@@ -60,10 +63,10 @@ public class EventPublisherImpl implements EventPublisher {
 
         ProducerRecord<String, Object> record = new ProducerRecord<>(topic, key, envelope);
 
-        record.headers().add(new RecordHeader("x-event-type", eventType.getBytes(StandardCharsets.UTF_8)));
-        record.headers().add(new RecordHeader("x-trace-id", traceId.getBytes(StandardCharsets.UTF_8)));
-        record.headers().add(new RecordHeader("x-source", applicationName.getBytes(StandardCharsets.UTF_8)));
-        record.headers().add(new RecordHeader("x-timestamp", String.valueOf(timestamp).getBytes(StandardCharsets.UTF_8)));
+        record.headers().add(new RecordHeader(HEADER_EVENT_TYPE, eventType.getBytes(StandardCharsets.UTF_8)));
+        record.headers().add(new RecordHeader(HEADER_TRACE_ID, traceId.getBytes(StandardCharsets.UTF_8)));
+        record.headers().add(new RecordHeader(HEADER_SOURCE, applicationName.getBytes(StandardCharsets.UTF_8)));
+        record.headers().add(new RecordHeader(HEADER_TIMESTAMP, String.valueOf(timestamp).getBytes(StandardCharsets.UTF_8)));
 
         headers.forEach((k, v) -> {
             if (v != null) {
@@ -83,3 +86,4 @@ public class EventPublisherImpl implements EventPublisher {
         }
     }
 }
+

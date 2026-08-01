@@ -1,5 +1,10 @@
 package com.gym.common.error;
 
+import lombok.Getter;
+import lombok.RequiredArgsConstructor;
+
+@Getter
+@RequiredArgsConstructor
 public enum CommonErrorCode implements ErrorCode {
     VALIDATION_FAILED(ErrorCategory.VALIDATION),
     MALFORMED_REQUEST(ErrorCategory.VALIDATION),
@@ -18,10 +23,6 @@ public enum CommonErrorCode implements ErrorCode {
 
     private final ErrorCategory category;
 
-    CommonErrorCode(ErrorCategory category) {
-        this.category = category;
-    }
-
     @Override
     public String code() {
         return name();
@@ -32,3 +33,4 @@ public enum CommonErrorCode implements ErrorCode {
         return category;
     }
 }
+

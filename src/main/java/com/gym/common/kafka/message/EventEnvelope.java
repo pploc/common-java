@@ -6,6 +6,10 @@ import com.fasterxml.jackson.databind.annotation.JsonSerialize;
 import com.google.protobuf.Message;
 import com.google.protobuf.util.JsonFormat;
 
+import java.lang.reflect.Method;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+
 @JsonSerialize(using = EventEnvelopeSerializer.class)
 public record EventEnvelope<T extends Message>(
     String eventType,
@@ -15,10 +19,13 @@ public record EventEnvelope<T extends Message>(
     String traceId,
     String source
 ) {
+    private static final ObjectMapper MAPPER = new ObjectMapper();
+    private static final JsonFormat.Parser JSON_PARSER = JsonFormat.parser().ignoringUnknownFields();
+    private static final Map<Class<?>, Method> NEW_BUILDER_CACHE = new ConcurrentHashMap<>();
+
     @SuppressWarnings("unchecked")
     public static <T extends Message> EventEnvelope<T> fromJson(String json, Class<T> payloadClass) throws Exception {
-        com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
-        com.fasterxml.jackson.databind.JsonNode node = mapper.readTree(json);
+        JsonNode node = MAPPER.readTree(json);
 
         String eventType = node.get("event_type").asText();
         String key = node.get("key").asText();
@@ -26,14 +33,24 @@ public record EventEnvelope<T extends Message>(
         String traceId = node.get("trace_id").asText();
         String source = node.get("source").asText();
 
-        com.fasterxml.jackson.databind.JsonNode payloadNode = node.get("payload");
+        JsonNode payloadNode = node.get("payload");
         T payload = null;
         if (payloadNode != null && !payloadNode.isNull()) {
-            java.lang.reflect.Method newBuilderMethod = payloadClass.getMethod("newBuilder");
+            Method newBuilderMethod = NEW_BUILDER_CACHE.computeIfAbsent(
+                payloadClass,
+                clazz -> {
+                    try {
+                        return clazz.getMethod("newBuilder");
+                    } catch (NoSuchMethodException e) {
+                        throw new IllegalArgumentException("Payload class " + clazz.getName() + " missing newBuilder method", e);
+                    }
+                }
+            );
             Message.Builder builder = (Message.Builder) newBuilderMethod.invoke(null);
-            JsonFormat.parser().ignoringUnknownFields().merge(payloadNode.toString(), builder);
+            JSON_PARSER.merge(payloadNode.toString(), builder);
             payload = (T) builder.build();
         }
         return new EventEnvelope<>(eventType, key, payload, timestamp, traceId, source);
     }
 }
+
