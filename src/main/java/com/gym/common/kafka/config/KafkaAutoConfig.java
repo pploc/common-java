@@ -46,10 +46,10 @@ public class KafkaAutoConfig {
     private final KafkaEventProperties kafkaEventProperties;
 
     @Value("${spring.kafka.bootstrap-servers:localhost:9092}")
-    private String bootstrapServers;
+    private String bootstrapServers = "localhost:9092";
 
     @Value("${spring.kafka.consumer.group-id:ms-gym-member-group}")
-    private String defaultGroupId;
+    private String defaultGroupId = "ms-gym-member-group";
 
     @Bean
     public ProducerFactory<String, Object> producerFactory() {

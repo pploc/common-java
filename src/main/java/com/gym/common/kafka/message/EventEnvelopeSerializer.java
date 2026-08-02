@@ -18,6 +18,9 @@ public class EventEnvelopeSerializer extends JsonSerializer<EventEnvelope<?>> {
         gen.writeNumberField("timestamp", value.timestamp());
         gen.writeStringField("trace_id", value.traceId());
         gen.writeStringField("source", value.source());
+        if (value.eventId() != null && !value.eventId().isBlank()) {
+            gen.writeStringField("event_id", value.eventId());
+        }
 
         gen.writeFieldName("payload");
         if (value.payload() != null) {

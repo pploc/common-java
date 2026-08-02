@@ -54,12 +54,9 @@ public class EventEnvelopeDeserializer extends JsonDeserializer<EventEnvelope<?>
         long timestamp = node.has("timestamp") ? node.get("timestamp").asLong() : 0L;
         String traceId = node.has("trace_id") ? node.get("trace_id").asText() : null;
         String source = node.has("source") ? node.get("source").asText() : null;
+        String eventId = node.hasNonNull("event_id") ? node.get("event_id").asText() : null;
 
         JsonNode payloadNode = node.get("payload");
-        if (payloadNode == null || payloadNode.isNull()) {
-            throw new JsonMappingException(p, "Payload cannot be null or empty for eventType: " + eventType);
-        }
-
         Object payload = null;
 
         if (payloadNode != null && !payloadNode.isNull()) {
@@ -92,7 +89,7 @@ public class EventEnvelopeDeserializer extends JsonDeserializer<EventEnvelope<?>
             }
         }
 
-        return new EventEnvelope(eventType, key, (Message) payload, timestamp, traceId, source);
+        return new EventEnvelope(eventType, key, (Message) payload, timestamp, traceId, source, eventId);
     }
 
     @SuppressWarnings("unchecked")

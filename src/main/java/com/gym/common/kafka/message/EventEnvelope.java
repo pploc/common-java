@@ -19,8 +19,18 @@ public record EventEnvelope<T extends Message>(
     T payload,
     long timestamp,
     String traceId,
-    String source
+    String source,
+    String eventId
 ) {
+    public EventEnvelope(
+            String eventType,
+            String key,
+            T payload,
+            long timestamp,
+            String traceId,
+            String source) {
+        this(eventType, key, payload, timestamp, traceId, source, null);
+    }
     private static final ObjectMapper MAPPER = new ObjectMapper();
     private static final JsonFormat.Parser JSON_PARSER = JsonFormat.parser().ignoringUnknownFields();
     private static final Map<Class<?>, Method> NEW_BUILDER_CACHE = new ConcurrentHashMap<>();
@@ -34,6 +44,7 @@ public record EventEnvelope<T extends Message>(
         long timestamp = node.get("timestamp").asLong();
         String traceId = node.get("trace_id").asText();
         String source = node.get("source").asText();
+        String eventId = node.hasNonNull("event_id") ? node.get("event_id").asText() : null;
 
         JsonNode payloadNode = node.get("payload");
         T payload = null;
@@ -52,7 +63,7 @@ public record EventEnvelope<T extends Message>(
             JSON_PARSER.merge(payloadNode.toString(), builder);
             payload = (T) builder.build();
         }
-        return new EventEnvelope<>(eventType, key, payload, timestamp, traceId, source);
+        return new EventEnvelope<>(eventType, key, payload, timestamp, traceId, source, eventId);
     }
 }
 

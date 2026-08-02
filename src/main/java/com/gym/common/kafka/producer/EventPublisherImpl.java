@@ -13,9 +13,11 @@ import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Component;
 
 import java.nio.charset.StandardCharsets;
+import java.time.Clock;
 import java.time.Instant;
 import java.util.Map;
 import java.util.Objects;
+import java.util.UUID;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
@@ -28,18 +30,29 @@ public class EventPublisherImpl implements EventPublisher {
     public static final String HEADER_TRACE_ID = "x-trace-id";
     public static final String HEADER_SOURCE = "x-source";
     public static final String HEADER_TIMESTAMP = "x-timestamp";
+    public static final String HEADER_EVENT_ID = "x-event-id";
 
     private final KafkaTemplate<String, Object> kafkaTemplate;
     private final String applicationName;
     private final KafkaEventProperties kafkaEventProperties;
+    private final Clock clock;
 
     public EventPublisherImpl(
             KafkaTemplate<String, Object> kafkaTemplate,
             @Value("${spring.application.name:unknown-service}") String applicationName,
             KafkaEventProperties kafkaEventProperties) {
+        this(kafkaTemplate, applicationName, kafkaEventProperties, Clock.systemUTC());
+    }
+
+    public EventPublisherImpl(
+            KafkaTemplate<String, Object> kafkaTemplate,
+            String applicationName,
+            KafkaEventProperties kafkaEventProperties,
+            Clock clock) {
         this.kafkaTemplate = kafkaTemplate;
         this.applicationName = applicationName;
         this.kafkaEventProperties = kafkaEventProperties;
+        this.clock = clock != null ? clock : Clock.systemUTC();
     }
 
     @Override
@@ -49,11 +62,17 @@ public class EventPublisherImpl implements EventPublisher {
 
     @Override
     public void publish(String topic, String key, Message payload, Map<String, String> headers) {
+        publish(topic, key, payload, UUID.randomUUID().toString(), headers);
+    }
+
+    @Override
+    public void publish(String topic, String key, Message payload, String eventId, Map<String, String> headers) {
         Objects.requireNonNull(topic, "Topic cannot be null");
         Objects.requireNonNull(payload, "Payload cannot be null");
+        Objects.requireNonNull(eventId, "Event ID cannot be null");
 
         String traceId = Span.current().getSpanContext().getTraceId();
-        long timestamp = Instant.now().toEpochMilli();
+        long timestamp = Instant.now(clock).toEpochMilli();
         String eventType = payload.getClass().getSimpleName();
 
         EventEnvelope<Message> envelope = new EventEnvelope<>(
@@ -62,7 +81,8 @@ public class EventPublisherImpl implements EventPublisher {
                 payload,
                 timestamp,
                 traceId,
-                applicationName
+                applicationName,
+                eventId
         );
 
         ProducerRecord<String, Object> record = new ProducerRecord<>(topic, key, envelope);
@@ -71,6 +91,7 @@ public class EventPublisherImpl implements EventPublisher {
         record.headers().add(new RecordHeader(HEADER_TRACE_ID, traceId.getBytes(StandardCharsets.UTF_8)));
         record.headers().add(new RecordHeader(HEADER_SOURCE, applicationName.getBytes(StandardCharsets.UTF_8)));
         record.headers().add(new RecordHeader(HEADER_TIMESTAMP, String.valueOf(timestamp).getBytes(StandardCharsets.UTF_8)));
+        record.headers().add(new RecordHeader(HEADER_EVENT_ID, eventId.getBytes(StandardCharsets.UTF_8)));
 
         headers.forEach((k, v) -> {
             if (v != null) {
@@ -81,7 +102,7 @@ public class EventPublisherImpl implements EventPublisher {
         long timeoutMs = kafkaEventProperties.getPublishTimeout().toMillis();
         try {
             kafkaTemplate.send(record).get(timeoutMs, TimeUnit.MILLISECONDS);
-            log.info("Published event type {} to {}", eventType, topic);
+            log.info("Published event type {} to {} with event ID {}", eventType, topic, eventId);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw EventPublishFailedException.of(eventType, e);

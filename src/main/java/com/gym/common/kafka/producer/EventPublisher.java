@@ -6,4 +6,5 @@ import java.util.Map;
 public interface EventPublisher {
     void publish(String topic, String key, Message payload);
     void publish(String topic, String key, Message payload, Map<String, String> headers);
+    void publish(String topic, String key, Message payload, String eventId, Map<String, String> headers);
 }
