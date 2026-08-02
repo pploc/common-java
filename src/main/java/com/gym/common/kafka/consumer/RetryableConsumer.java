@@ -4,6 +4,10 @@ import com.google.protobuf.Message;
 import com.gym.common.kafka.message.EventEnvelope;
 import lombok.extern.slf4j.Slf4j;
 
+/**
+ * Legacy JSON-envelope retry adapter. New Kafka listeners use the shared
+ * {@code DefaultErrorHandler} and concrete Protobuf messages.
+ */
 @Slf4j
 public abstract class RetryableConsumer<T extends Message> {
 

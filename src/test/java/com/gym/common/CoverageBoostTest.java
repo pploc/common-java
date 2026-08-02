@@ -40,6 +40,19 @@ class CoverageBoostTest {
         ConsumerRecord<String, Object> recordNoRetry = new ConsumerRecord<>("topic-1", 0, 0L, "k", "v");
         Headers h2 = KafkaAutoConfig.createDlqHeaders(recordNoRetry, new RuntimeException((String) null));
         assertNotNull(h2);
+        assertEquals("RuntimeException", new String(
+                h2.lastHeader(KafkaAutoConfig.HEADER_EXCEPTION_MESSAGE).value(),
+                StandardCharsets.UTF_8
+        ));
+
+        ConsumerRecord<String, Object> recordWithMalformedRetry = new ConsumerRecord<>("topic-1", 0, 0L, "k", "v");
+        recordWithMalformedRetry.headers().add(KafkaAutoConfig.HEADER_RETRY_COUNT, "not-a-number".getBytes(StandardCharsets.UTF_8));
+        Headers h3 = KafkaAutoConfig.createDlqHeaders(recordWithMalformedRetry, new RuntimeException("secret detail"));
+        assertEquals("1", new String(h3.lastHeader(KafkaAutoConfig.HEADER_RETRY_COUNT).value(), StandardCharsets.UTF_8));
+        assertEquals("RuntimeException", new String(
+                h3.lastHeader(KafkaAutoConfig.HEADER_EXCEPTION_MESSAGE).value(),
+                StandardCharsets.UTF_8
+        ));
     }
 
     @Test

@@ -11,6 +11,10 @@ import java.lang.reflect.Method;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
+/**
+ * Legacy JSON transport envelope. The default Kafka transport is a concrete
+ * Protobuf {@link Message} framed by Confluent Schema Registry.
+ */
 @JsonSerialize(using = EventEnvelopeSerializer.class)
 @JsonDeserialize(using = EventEnvelopeDeserializer.class)
 public record EventEnvelope<T extends Message>(

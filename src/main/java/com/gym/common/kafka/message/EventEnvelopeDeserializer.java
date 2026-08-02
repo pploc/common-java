@@ -11,6 +11,7 @@ import java.lang.reflect.Method;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
+/** Legacy JSON envelope deserializer. It is not configured for Kafka transport. */
 public class EventEnvelopeDeserializer extends JsonDeserializer<EventEnvelope<?>> implements ContextualDeserializer {
 
     private static final JsonFormat.Parser JSON_PARSER = JsonFormat.parser().ignoringUnknownFields();

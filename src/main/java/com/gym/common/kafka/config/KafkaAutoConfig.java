@@ -19,12 +19,10 @@ import org.springframework.kafka.config.ConcurrentKafkaListenerContainerFactory;
 import org.springframework.kafka.core.*;
 import org.springframework.kafka.listener.DeadLetterPublishingRecoverer;
 import org.springframework.kafka.listener.DefaultErrorHandler;
-import org.springframework.kafka.retrytopic.RetryTopicConfiguration;
-import org.springframework.kafka.retrytopic.RetryTopicConfigurationBuilder;
+import org.springframework.kafka.support.ExponentialBackOffWithMaxRetries;
 import org.springframework.kafka.support.serializer.ErrorHandlingDeserializer;
 import io.confluent.kafka.serializers.protobuf.KafkaProtobufDeserializer;
 import io.confluent.kafka.serializers.protobuf.KafkaProtobufSerializer;
-import org.springframework.util.backoff.ExponentialBackOff;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
@@ -58,7 +56,8 @@ public class KafkaAutoConfig {
         config.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
         config.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, KafkaProtobufSerializer.class);
         config.put("schema.registry.url", kafkaEventProperties.getSchemaRegistryUrl());
-        config.put("value.subject.name.strategy", "io.confluent.kafka.serializers.subject.TopicNameStrategy");
+        config.put("value.subject.name.strategy", kafkaEventProperties.getValueSubjectNameStrategy());
+        config.put("auto.register.schemas", kafkaEventProperties.isAutoRegisterSchemas());
         config.put(ProducerConfig.ACKS_CONFIG, "all");
         config.put(ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG, true);
         config.put(ProducerConfig.RETRIES_CONFIG, Integer.MAX_VALUE);
@@ -82,7 +81,8 @@ public class KafkaAutoConfig {
         config.put(ErrorHandlingDeserializer.KEY_DESERIALIZER_CLASS, StringDeserializer.class);
         config.put(ErrorHandlingDeserializer.VALUE_DESERIALIZER_CLASS, KafkaProtobufDeserializer.class);
         config.put("schema.registry.url", kafkaEventProperties.getSchemaRegistryUrl());
-        config.put("value.subject.name.strategy", "io.confluent.kafka.serializers.subject.TopicNameStrategy");
+        config.put("value.subject.name.strategy", kafkaEventProperties.getValueSubjectNameStrategy());
+        config.put("auto.register.schemas", kafkaEventProperties.isAutoRegisterSchemas());
         return new DefaultKafkaConsumerFactory<>(config);
     }
 
@@ -90,53 +90,46 @@ public class KafkaAutoConfig {
     public DefaultErrorHandler errorHandler(KafkaTemplate<String, Object> kafkaTemplate) {
         DeadLetterPublishingRecoverer recoverer = new DeadLetterPublishingRecoverer(kafkaTemplate,
                 (record, exception) -> new TopicPartition(record.topic() + kafkaEventProperties.getDlq().getSuffix(), record.partition()));
-
         recoverer.setHeadersFunction(KafkaAutoConfig::createDlqHeaders);
 
-        // Exponential backoff configured from properties
-        ExponentialBackOff backOff = new ExponentialBackOff(
-                kafkaEventProperties.getBackoff().getInitialInterval().toMillis(),
-                kafkaEventProperties.getBackoff().getMultiplier()
+        var retry = kafkaEventProperties.getRetry();
+        ExponentialBackOffWithMaxRetries backOff = new ExponentialBackOffWithMaxRetries(
+                retry.isEnabled() ? retry.getRetryCount() : 0
         );
-        backOff.setMaxInterval(kafkaEventProperties.getBackoff().getMaxInterval().toMillis());
-        backOff.setMaxElapsedTime(kafkaEventProperties.getBackoff().getMaxElapsedTime().toMillis());
+        backOff.setInitialInterval(retry.getInitialInterval().toMillis());
+        backOff.setMultiplier(retry.getMultiplier());
+        backOff.setMaxInterval(retry.getMaxInterval().toMillis());
 
-        return new DefaultErrorHandler(recoverer, backOff);
-    }
-
-    @Bean
-    public RetryTopicConfiguration retryTopicConfiguration(KafkaTemplate<String, Object> kafkaTemplate) {
-        if (!kafkaEventProperties.getRetry().isEnabled()) {
-            return null;
-        }
-        return RetryTopicConfigurationBuilder.newInstance()
-                .maxAttempts(kafkaEventProperties.getRetry().getMaxAttempts())
-                .exponentialBackoff(
-                        kafkaEventProperties.getRetry().getInitialInterval().toMillis(),
-                        kafkaEventProperties.getRetry().getMultiplier(),
-                        kafkaEventProperties.getRetry().getMaxInterval().toMillis()
-                )
-                .useSingleTopicForSameIntervals()
-                .create(kafkaTemplate);
+        DefaultErrorHandler errorHandler = new DefaultErrorHandler(recoverer, backOff);
+        errorHandler.setCommitRecovered(true);
+        return errorHandler;
     }
 
     public static Headers createDlqHeaders(ConsumerRecord<?, ?> record, Exception exception) {
         Headers headers = new RecordHeaders();
         headers.add(HEADER_ORIGINAL_TOPIC, record.topic().getBytes(StandardCharsets.UTF_8));
-
-        String excMsg = exception.getCause() != null && exception.getCause().getMessage() != null
-                ? exception.getCause().getMessage()
-                : (exception.getMessage() != null ? exception.getMessage() : "Unknown error");
-        headers.add(HEADER_EXCEPTION_MESSAGE, excMsg.getBytes(StandardCharsets.UTF_8));
+        headers.add(HEADER_EXCEPTION_MESSAGE, clientSafeDiagnostic(exception).getBytes(StandardCharsets.UTF_8));
         headers.add(HEADER_FAILED_AT, String.valueOf(Instant.now().toEpochMilli()).getBytes(StandardCharsets.UTF_8));
-
-        int attempt = 1;
-        org.apache.kafka.common.header.Header countHeader = record.headers().lastHeader(HEADER_RETRY_COUNT);
-        if (countHeader != null && countHeader.value() != null) {
-            attempt = Integer.parseInt(new String(countHeader.value(), StandardCharsets.UTF_8)) + 1;
-        }
-        headers.add(HEADER_RETRY_COUNT, String.valueOf(attempt).getBytes(StandardCharsets.UTF_8));
+        headers.add(HEADER_RETRY_COUNT, String.valueOf(nextRetryCount(record)).getBytes(StandardCharsets.UTF_8));
         return headers;
+    }
+
+    private static String clientSafeDiagnostic(Exception exception) {
+        return exception == null ? "Kafka message processing failed" : exception.getClass().getSimpleName();
+    }
+
+    private static int nextRetryCount(ConsumerRecord<?, ?> record) {
+        org.apache.kafka.common.header.Header countHeader = record.headers().lastHeader(HEADER_RETRY_COUNT);
+        if (countHeader == null || countHeader.value() == null) {
+            return 1;
+        }
+
+        try {
+            int retryCount = Integer.parseInt(new String(countHeader.value(), StandardCharsets.UTF_8));
+            return retryCount >= 0 ? retryCount + 1 : 1;
+        } catch (NumberFormatException ignored) {
+            return 1;
+        }
     }
 
     @Bean

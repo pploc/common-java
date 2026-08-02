@@ -7,6 +7,7 @@ import com.google.protobuf.util.JsonFormat;
 
 import java.io.IOException;
 
+/** Legacy JSON envelope serializer. It is not configured for Kafka transport. */
 public class EventEnvelopeSerializer extends JsonSerializer<EventEnvelope<?>> {
     private static final JsonFormat.Printer JSON_PRINTER = JsonFormat.printer().omittingInsignificantWhitespace();
 
