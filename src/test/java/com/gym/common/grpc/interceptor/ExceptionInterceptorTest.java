@@ -29,6 +29,25 @@ class ExceptionInterceptorTest {
     }
 
     @Test
+    void testExceptionInterceptorMapsUnsupportedToUnimplemented() {
+        ExceptionInterceptor interceptor = new ExceptionInterceptor();
+        ServerCall<com.google.protobuf.Empty, com.google.protobuf.Empty> call = mock(ServerCall.class);
+        ServerCallHandler<com.google.protobuf.Empty, com.google.protobuf.Empty> next = (c, h) -> new ServerCall.Listener<>() {
+            @Override
+            public void onHalfClose() {
+                throw new com.gym.common.error.DomainException(
+                        com.gym.common.error.CommonErrorCode.METHOD_NOT_ALLOWED,
+                        "Method is not supported") {};
+            }
+        };
+
+        ServerCall.Listener<com.google.protobuf.Empty> listener = interceptor.interceptCall(call, new Metadata(), next);
+        listener.onHalfClose();
+
+        verify(call).close(argThat(status -> status.getCode() == Status.Code.UNIMPLEMENTED), any());
+    }
+
+    @Test
     void testExceptionInterceptorCatchesDomainExceptionCategories() {
         ExceptionInterceptor interceptor = new ExceptionInterceptor();
 

@@ -51,6 +51,7 @@ public class ExceptionInterceptor implements ServerInterceptor {
                 case FORBIDDEN -> Status.Code.PERMISSION_DENIED;
                 case NOT_FOUND -> Status.Code.NOT_FOUND;
                 case CONFLICT -> Status.Code.ALREADY_EXISTS;
+                case UNSUPPORTED -> Status.Code.UNIMPLEMENTED;
                 case UNPROCESSABLE -> Status.Code.FAILED_PRECONDITION;
                 case RATE_LIMITED -> Status.Code.RESOURCE_EXHAUSTED;
                 case UNAVAILABLE -> Status.Code.UNAVAILABLE;

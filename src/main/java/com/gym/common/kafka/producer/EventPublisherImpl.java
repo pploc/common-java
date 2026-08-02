@@ -2,7 +2,6 @@ package com.gym.common.kafka.producer;
 
 import com.google.protobuf.Message;
 import com.gym.common.error.EventPublishFailedException;
-import com.gym.common.kafka.message.EventEnvelope;
 import com.gym.common.kafka.config.KafkaEventProperties;
 import io.opentelemetry.api.trace.Span;
 import lombok.extern.slf4j.Slf4j;
@@ -26,11 +25,13 @@ import java.util.concurrent.TimeoutException;
 @Component
 public class EventPublisherImpl implements EventPublisher {
 
-    public static final String HEADER_EVENT_TYPE = "x-event-type";
+    public static final String HEADER_EVENT_TYPE = "event-type";
+    public static final String HEADER_SOURCE = "source";
+    public static final String HEADER_TIMESTAMP = "timestamp";
+    public static final String HEADER_EVENT_ID = "event-id";
+    public static final String HEADER_TRACEPARENT = "traceparent";
+    public static final String HEADER_TRACESTATE = "tracestate";
     public static final String HEADER_TRACE_ID = "x-trace-id";
-    public static final String HEADER_SOURCE = "x-source";
-    public static final String HEADER_TIMESTAMP = "x-timestamp";
-    public static final String HEADER_EVENT_ID = "x-event-id";
 
     private final KafkaTemplate<String, Object> kafkaTemplate;
     private final String applicationName;
@@ -71,27 +72,27 @@ public class EventPublisherImpl implements EventPublisher {
         Objects.requireNonNull(payload, "Payload cannot be null");
         Objects.requireNonNull(eventId, "Event ID cannot be null");
 
-        String traceId = Span.current().getSpanContext().getTraceId();
+        var spanContext = Span.current().getSpanContext();
         long timestamp = Instant.now(clock).toEpochMilli();
-        String eventType = payload.getClass().getSimpleName();
+        String eventType = payload.getDescriptorForType().getFullName();
 
-        EventEnvelope<Message> envelope = new EventEnvelope<>(
-                eventType,
-                key,
-                payload,
-                timestamp,
-                traceId,
-                applicationName,
-                eventId
-        );
-
-        ProducerRecord<String, Object> record = new ProducerRecord<>(topic, key, envelope);
+        // A Protobuf Kafka serializer configured by KafkaAutoConfig applies the
+        // Schema Registry framing. The transport value is never a JSON envelope.
+        ProducerRecord<String, Object> record = new ProducerRecord<>(topic, key, payload);
 
         record.headers().add(new RecordHeader(HEADER_EVENT_TYPE, eventType.getBytes(StandardCharsets.UTF_8)));
-        record.headers().add(new RecordHeader(HEADER_TRACE_ID, traceId.getBytes(StandardCharsets.UTF_8)));
         record.headers().add(new RecordHeader(HEADER_SOURCE, applicationName.getBytes(StandardCharsets.UTF_8)));
         record.headers().add(new RecordHeader(HEADER_TIMESTAMP, String.valueOf(timestamp).getBytes(StandardCharsets.UTF_8)));
         record.headers().add(new RecordHeader(HEADER_EVENT_ID, eventId.getBytes(StandardCharsets.UTF_8)));
+        if (spanContext.isValid()) {
+            String traceparent = String.format(
+                    "00-%s-%s-%02x",
+                    spanContext.getTraceId(),
+                    spanContext.getSpanId(),
+                    spanContext.getTraceFlags().asByte());
+            record.headers().add(new RecordHeader(HEADER_TRACEPARENT, traceparent.getBytes(StandardCharsets.UTF_8)));
+            record.headers().add(new RecordHeader(HEADER_TRACE_ID, spanContext.getTraceId().getBytes(StandardCharsets.UTF_8)));
+        }
 
         headers.forEach((k, v) -> {
             if (v != null) {

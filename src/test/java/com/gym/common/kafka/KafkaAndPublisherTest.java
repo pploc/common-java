@@ -35,7 +35,14 @@ class KafkaAndPublisherTest {
         when(kafkaTemplate.send(any(ProducerRecord.class))).thenReturn(future);
 
         publisher.publish("test-topic", "key-1", Empty.getDefaultInstance());
-        verify(kafkaTemplate).send(any(ProducerRecord.class));
+        org.mockito.ArgumentCaptor<ProducerRecord<String, Object>> recordCaptor = org.mockito.ArgumentCaptor.forClass(ProducerRecord.class);
+        verify(kafkaTemplate).send(recordCaptor.capture());
+        ProducerRecord<String, Object> record = recordCaptor.getValue();
+        assertSame(Empty.getDefaultInstance(), record.value());
+        assertNotNull(record.headers().lastHeader(EventPublisherImpl.HEADER_EVENT_TYPE));
+        assertNotNull(record.headers().lastHeader(EventPublisherImpl.HEADER_SOURCE));
+        assertNotNull(record.headers().lastHeader(EventPublisherImpl.HEADER_TIMESTAMP));
+        assertNotNull(record.headers().lastHeader(EventPublisherImpl.HEADER_EVENT_ID));
 
         publisher.publish("test-topic", "key-1", Empty.getDefaultInstance(), Map.of("x-custom", "val"));
     }
