@@ -6,8 +6,23 @@ plugins {
     id 'maven-publish'
 }
 
+def versionFile = file('version.properties')
+def versionProps = new Properties()
+if (!versionFile.exists()) {
+    versionFile.text = "major=1\nminor=0\npatch=1\n"
+}
+versionFile.withInputStream { versionProps.load(it) }
+
+boolean isPublishing = gradle.startParameter.taskNames.any { it.contains('publish') || it.contains('Publish') }
+if (isPublishing) {
+    int currentPatch = (versionProps['patch'] ?: '0').toInteger()
+    int newPatch = currentPatch + 1
+    versionProps['patch'] = newPatch.toString()
+    versionFile.withWriter { writer -> versionProps.store(writer, "Auto-incremented on publish") }
+}
+
 group = 'com.gym'
-version = '1.0.1'
+version = "${versionProps['major']}.${versionProps['minor']}.${versionProps['patch']}"
 
 java {
     toolchain {
@@ -133,4 +148,3 @@ jacocoTestCoverageVerification {
         }
     }
 }
-
