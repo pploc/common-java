@@ -4,26 +4,31 @@ import com.gym.common.grpc.security.GrpcSecurityContext;
 import com.gym.common.grpc.security.RequireRole;
 import com.gym.common.grpc.security.UserClaims;
 import io.grpc.*;
+import lombok.RequiredArgsConstructor;
 import org.springframework.core.annotation.AnnotationUtils;
 import java.lang.reflect.Method;
 import java.util.Arrays;
 import java.util.List;
 
+@RequiredArgsConstructor
 public class AuthServerInterceptor implements ServerInterceptor {
 
-    private final GrpcMethodRegistry methodRegistry;
+    private static final Metadata.Key<String> USER_ID_KEY =
+            Metadata.Key.of("x-user-id", Metadata.ASCII_STRING_MARSHALLER);
+    private static final Metadata.Key<String> USER_ROLE_KEY =
+            Metadata.Key.of("x-user-role", Metadata.ASCII_STRING_MARSHALLER);
+    private static final Metadata.Key<String> GYM_ID_KEY =
+            Metadata.Key.of("x-gym-id", Metadata.ASCII_STRING_MARSHALLER);
 
-    public AuthServerInterceptor(GrpcMethodRegistry methodRegistry) {
-        this.methodRegistry = methodRegistry;
-    }
+    private final GrpcMethodRegistry methodRegistry;
 
     @Override
     public <ReqT, RespT> ServerCall.Listener<ReqT> interceptCall(
             ServerCall<ReqT, RespT> call, Metadata headers, ServerCallHandler<ReqT, RespT> next) {
 
-        String userId = headers.get(Metadata.Key.of("x-user-id", Metadata.ASCII_STRING_MARSHALLER));
-        String role = headers.get(Metadata.Key.of("x-user-role", Metadata.ASCII_STRING_MARSHALLER));
-        String gymId = headers.get(Metadata.Key.of("x-gym-id", Metadata.ASCII_STRING_MARSHALLER));
+        String userId = headers.get(USER_ID_KEY);
+        String role = headers.get(USER_ROLE_KEY);
+        String gymId = headers.get(GYM_ID_KEY);
 
         UserClaims claims = new UserClaims(userId, role, gymId);
 
@@ -53,3 +58,4 @@ public class AuthServerInterceptor implements ServerInterceptor {
         return Contexts.interceptCall(newContext, call, headers, next);
     }
 }
+

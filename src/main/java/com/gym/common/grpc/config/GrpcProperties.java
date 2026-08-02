@@ -9,6 +9,10 @@ import java.time.Duration;
 @Setter
 @ConfigurationProperties(prefix = "gym.grpc")
 public class GrpcProperties {
-    private int port = 9090;
-    private Duration shutdownTimeout = Duration.ofSeconds(15);
+    public static final int DEFAULT_PORT = 9090;
+    public static final Duration DEFAULT_SHUTDOWN_TIMEOUT = Duration.ofSeconds(15);
+
+    private int port = DEFAULT_PORT;
+    private Duration shutdownTimeout = DEFAULT_SHUTDOWN_TIMEOUT;
 }
+

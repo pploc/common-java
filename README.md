@@ -4,8 +4,8 @@ Shared Java library for the gym-chain microservices. Built with Java 26 and Spri
 
 ## Features
 
-### 1. gRPC Server Auto-Configuration & Interceptors
-Automatically detects and registers all `BindableService` beans. Wraps them with standard interceptors:
+### 1. gRPC Auto-Configured Interceptors
+Auto-configures standard gRPC server interceptor beans for microservices:
 - **Tracing**: Integrates OpenTelemetry span propagation.
 - **Logging**: Captures request start, end, status, and duration using MDC trace ID context.
 - **Metrics**: Records call latency and completions using Micrometer.
@@ -14,8 +14,8 @@ Automatically detects and registers all `BindableService` beans. Wraps them with
 
 ### 2. Kafka Messaging
 Synchronous Event Publisher ensuring atomic database-and-message operations.
-- **EventEnvelope**: Standardized JSON envelope wrapping Protobuf payloads.
-- **Error Handling & DLQ**: Exponential backoff retry handler (3 retries: 2s, 4s, 8s) routing toxic messages to `[topic].DLQ` with diagnostic headers.
+- **Phase 0 Wire Contract**: Concrete Protobuf values must use Confluent Schema Registry framing with TopicNameStrategy (`<topic>-value`) and BACKWARD compatibility. Event metadata is defined by the versioned `gym-proto/contracts/v1` fixtures. The existing JSON `EventEnvelope` transport is a legacy implementation to be migrated before the contract is released.
+- **Phase 0 Error Handling & DLQ Contract**: Initial handling plus retries after 2s, 4s, and 8s; after the third retry fails, preserve the original key, framed value, and headers in `{topic}.DLQ`. Commit the original offset only after handler success or confirmed DLQ publication.
 
 ### 3. Pagination
 - **CursorPage / CursorUtils**: URL-safe base64 keyset pagination helper (supporting compound fields).

@@ -1,6 +1,8 @@
 package com.gym.common.kafka.config;
 
+import lombok.RequiredArgsConstructor;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
+import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.header.Headers;
@@ -17,9 +19,11 @@ import org.springframework.kafka.config.ConcurrentKafkaListenerContainerFactory;
 import org.springframework.kafka.core.*;
 import org.springframework.kafka.listener.DeadLetterPublishingRecoverer;
 import org.springframework.kafka.listener.DefaultErrorHandler;
+import org.springframework.kafka.retrytopic.RetryTopicConfiguration;
+import org.springframework.kafka.retrytopic.RetryTopicConfigurationBuilder;
 import org.springframework.kafka.support.serializer.ErrorHandlingDeserializer;
-import org.springframework.kafka.support.serializer.JsonDeserializer;
-import org.springframework.kafka.support.serializer.JsonSerializer;
+import io.confluent.kafka.serializers.protobuf.KafkaProtobufDeserializer;
+import io.confluent.kafka.serializers.protobuf.KafkaProtobufSerializer;
 import org.springframework.util.backoff.ExponentialBackOff;
 
 import java.nio.charset.StandardCharsets;
@@ -31,23 +35,30 @@ import java.util.Map;
 @EnableKafka
 @ConditionalOnClass(KafkaTemplate.class)
 @EnableConfigurationProperties(KafkaEventProperties.class)
+@RequiredArgsConstructor
 public class KafkaAutoConfig {
+
+    public static final String HEADER_ORIGINAL_TOPIC = "x-original-topic";
+    public static final String HEADER_EXCEPTION_MESSAGE = "x-exception-message";
+    public static final String HEADER_FAILED_AT = "x-failed-at";
+    public static final String HEADER_RETRY_COUNT = "x-retry-count";
 
     private final KafkaEventProperties kafkaEventProperties;
 
-    public KafkaAutoConfig(KafkaEventProperties kafkaEventProperties) {
-        this.kafkaEventProperties = kafkaEventProperties;
-    }
-
     @Value("${spring.kafka.bootstrap-servers:localhost:9092}")
-    private String bootstrapServers;
+    private String bootstrapServers = "localhost:9092";
+
+    @Value("${spring.kafka.consumer.group-id:ms-gym-member-group}")
+    private String defaultGroupId = "ms-gym-member-group";
 
     @Bean
     public ProducerFactory<String, Object> producerFactory() {
         Map<String, Object> config = new HashMap<>();
         config.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
         config.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
-        config.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, JsonSerializer.class);
+        config.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, KafkaProtobufSerializer.class);
+        config.put("schema.registry.url", kafkaEventProperties.getSchemaRegistryUrl());
+        config.put("value.subject.name.strategy", "io.confluent.kafka.serializers.subject.TopicNameStrategy");
         config.put(ProducerConfig.ACKS_CONFIG, "all");
         config.put(ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG, true);
         config.put(ProducerConfig.RETRIES_CONFIG, Integer.MAX_VALUE);
@@ -63,11 +74,15 @@ public class KafkaAutoConfig {
     public ConsumerFactory<String, Object> consumerFactory() {
         Map<String, Object> config = new HashMap<>();
         config.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
+        config.put(ConsumerConfig.GROUP_ID_CONFIG, defaultGroupId);
+        config.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
+        config.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, false);
         config.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, ErrorHandlingDeserializer.class);
         config.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, ErrorHandlingDeserializer.class);
         config.put(ErrorHandlingDeserializer.KEY_DESERIALIZER_CLASS, StringDeserializer.class);
-        config.put(ErrorHandlingDeserializer.VALUE_DESERIALIZER_CLASS, JsonDeserializer.class);
-        config.put(JsonDeserializer.TRUSTED_PACKAGES, kafkaEventProperties.getTrustedPackages());
+        config.put(ErrorHandlingDeserializer.VALUE_DESERIALIZER_CLASS, KafkaProtobufDeserializer.class);
+        config.put("schema.registry.url", kafkaEventProperties.getSchemaRegistryUrl());
+        config.put("value.subject.name.strategy", "io.confluent.kafka.serializers.subject.TopicNameStrategy");
         return new DefaultKafkaConsumerFactory<>(config);
     }
 
@@ -76,22 +91,7 @@ public class KafkaAutoConfig {
         DeadLetterPublishingRecoverer recoverer = new DeadLetterPublishingRecoverer(kafkaTemplate,
                 (record, exception) -> new TopicPartition(record.topic() + kafkaEventProperties.getDlq().getSuffix(), record.partition()));
 
-        recoverer.setHeadersFunction((record, exception) -> {
-            Headers headers = new RecordHeaders();
-            headers.add("x-original-topic", record.topic().getBytes(StandardCharsets.UTF_8));
-            headers.add("x-exception-message", exception.getCause() != null
-                    ? exception.getCause().getMessage().getBytes(StandardCharsets.UTF_8)
-                    : exception.getMessage().getBytes(StandardCharsets.UTF_8));
-            headers.add("x-failed-at", String.valueOf(Instant.now().toEpochMilli()).getBytes(StandardCharsets.UTF_8));
-
-            int attempt = 1;
-            org.apache.kafka.common.header.Header countHeader = record.headers().lastHeader("x-retry-count");
-            if (countHeader != null) {
-                attempt = java.lang.Integer.parseInt(new String(countHeader.value(), StandardCharsets.UTF_8)) + 1;
-            }
-            headers.add("x-retry-count", String.valueOf(attempt).getBytes(StandardCharsets.UTF_8));
-            return headers;
-        });
+        recoverer.setHeadersFunction(KafkaAutoConfig::createDlqHeaders);
 
         // Exponential backoff configured from properties
         ExponentialBackOff backOff = new ExponentialBackOff(
@@ -105,11 +105,47 @@ public class KafkaAutoConfig {
     }
 
     @Bean
+    public RetryTopicConfiguration retryTopicConfiguration(KafkaTemplate<String, Object> kafkaTemplate) {
+        if (!kafkaEventProperties.getRetry().isEnabled()) {
+            return null;
+        }
+        return RetryTopicConfigurationBuilder.newInstance()
+                .maxAttempts(kafkaEventProperties.getRetry().getMaxAttempts())
+                .exponentialBackoff(
+                        kafkaEventProperties.getRetry().getInitialInterval().toMillis(),
+                        kafkaEventProperties.getRetry().getMultiplier(),
+                        kafkaEventProperties.getRetry().getMaxInterval().toMillis()
+                )
+                .useSingleTopicForSameIntervals()
+                .create(kafkaTemplate);
+    }
+
+    public static Headers createDlqHeaders(ConsumerRecord<?, ?> record, Exception exception) {
+        Headers headers = new RecordHeaders();
+        headers.add(HEADER_ORIGINAL_TOPIC, record.topic().getBytes(StandardCharsets.UTF_8));
+
+        String excMsg = exception.getCause() != null && exception.getCause().getMessage() != null
+                ? exception.getCause().getMessage()
+                : (exception.getMessage() != null ? exception.getMessage() : "Unknown error");
+        headers.add(HEADER_EXCEPTION_MESSAGE, excMsg.getBytes(StandardCharsets.UTF_8));
+        headers.add(HEADER_FAILED_AT, String.valueOf(Instant.now().toEpochMilli()).getBytes(StandardCharsets.UTF_8));
+
+        int attempt = 1;
+        org.apache.kafka.common.header.Header countHeader = record.headers().lastHeader(HEADER_RETRY_COUNT);
+        if (countHeader != null && countHeader.value() != null) {
+            attempt = Integer.parseInt(new String(countHeader.value(), StandardCharsets.UTF_8)) + 1;
+        }
+        headers.add(HEADER_RETRY_COUNT, String.valueOf(attempt).getBytes(StandardCharsets.UTF_8));
+        return headers;
+    }
+
+    @Bean
     public ConcurrentKafkaListenerContainerFactory<String, Object> kafkaListenerContainerFactory(
             ConsumerFactory<String, Object> consumerFactory,
             DefaultErrorHandler errorHandler) {
         ConcurrentKafkaListenerContainerFactory<String, Object> factory = new ConcurrentKafkaListenerContainerFactory<>();
         factory.setConsumerFactory(consumerFactory);
+        factory.getContainerProperties().setAckMode(org.springframework.kafka.listener.ContainerProperties.AckMode.MANUAL_IMMEDIATE);
         factory.setCommonErrorHandler(errorHandler);
         return factory;
     }

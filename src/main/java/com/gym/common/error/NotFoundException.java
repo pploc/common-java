@@ -5,7 +5,15 @@ public class NotFoundException extends DomainException {
         super(CommonErrorCode.ENDPOINT_NOT_FOUND, message);
     }
 
+    public NotFoundException(String message, Throwable cause) {
+        super(CommonErrorCode.ENDPOINT_NOT_FOUND, message, cause);
+    }
+
     public NotFoundException(ErrorCode errorCode, String message) {
         super(errorCode, message);
+    }
+
+    public NotFoundException(ErrorCode errorCode, String message, Throwable cause) {
+        super(errorCode, message, cause);
     }
 }

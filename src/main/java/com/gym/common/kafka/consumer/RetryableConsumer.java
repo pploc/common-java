@@ -2,11 +2,10 @@ package com.gym.common.kafka.consumer;
 
 import com.google.protobuf.Message;
 import com.gym.common.kafka.message.EventEnvelope;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.extern.slf4j.Slf4j;
 
+@Slf4j
 public abstract class RetryableConsumer<T extends Message> {
-    private static final Logger log = LoggerFactory.getLogger(RetryableConsumer.class);
 
     public abstract void onMessage(EventEnvelope<T> envelope) throws Exception;
 
@@ -15,3 +14,4 @@ public abstract class RetryableConsumer<T extends Message> {
         throw new RuntimeException("Consumer error, triggering retry/DLQ", ex);
     }
 }
+

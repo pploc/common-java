@@ -9,9 +9,12 @@ import java.time.Duration;
 @Setter
 @ConfigurationProperties(prefix = "gym.kafka")
 public class KafkaEventProperties {
+    @Deprecated(forRemoval = true)
     private String trustedPackages = "com.gym.*";
+    private String schemaRegistryUrl = "http://localhost:8081";
     private final Dlq dlq = new Dlq();
     private final Backoff backoff = new Backoff();
+    private final Retry retry = new Retry();
     private Duration publishTimeout = Duration.ofMillis(25000);
 
     @Getter
@@ -27,5 +30,15 @@ public class KafkaEventProperties {
         private double multiplier = 2.0;
         private Duration maxInterval = Duration.ofSeconds(8);
         private Duration maxElapsedTime = Duration.ofSeconds(15);
+    }
+
+    @Getter
+    @Setter
+    public static class Retry {
+        private boolean enabled = true;
+        private int maxAttempts = 4;
+        private Duration initialInterval = Duration.ofSeconds(2);
+        private double multiplier = 2.0;
+        private Duration maxInterval = Duration.ofSeconds(8);
     }
 }
