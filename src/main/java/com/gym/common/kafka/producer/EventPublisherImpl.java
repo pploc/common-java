@@ -9,6 +9,7 @@ import io.opentelemetry.context.Context;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.header.internals.RecordHeader;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Component;
@@ -52,6 +53,7 @@ public class EventPublisherImpl implements EventPublisher {
     private final KafkaEventProperties kafkaEventProperties;
     private final Clock clock;
 
+    @Autowired
     public EventPublisherImpl(
             KafkaTemplate<String, Object> kafkaTemplate,
             @Value("${spring.application.name:unknown-service}") String applicationName,
