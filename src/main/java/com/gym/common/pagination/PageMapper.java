@@ -7,7 +7,7 @@ import lombok.experimental.UtilityClass;
 public class PageMapper {
     public static PaginationResponse toProtoResponse(CursorPage<?> page) {
         if (page == null) {
-            return PaginationResponse.newBuilder().build();
+            return PaginationResponse.getDefaultInstance();
         }
         return PaginationResponse.newBuilder()
                 .setTotalRecords((int) page.totalRecords())
@@ -19,7 +19,7 @@ public class PageMapper {
 
     public static PaginationResponse toProtoResponse(NormalPage<?> page) {
         if (page == null) {
-            return PaginationResponse.newBuilder().build();
+            return PaginationResponse.getDefaultInstance();
         }
         return PaginationResponse.newBuilder()
                 .setTotalRecords((int) page.totalRecords())

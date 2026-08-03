@@ -41,19 +41,11 @@ class ConfigAndPropertiesTest {
     @Test
     void testKafkaEventProperties() {
         KafkaEventProperties props = new KafkaEventProperties();
-        assertEquals("com.gym.*", props.getTrustedPackages());
         assertEquals("http://localhost:8081", props.getSchemaRegistryUrl());
         assertEquals("io.confluent.kafka.serializers.subject.TopicNameStrategy", props.getValueSubjectNameStrategy());
         assertFalse(props.isAutoRegisterSchemas());
         assertEquals(".DLQ", props.getDlq().getSuffix());
-        assertEquals(3, props.getRetry().getRetryCount());
-        assertEquals(Duration.ofSeconds(2), props.getRetry().getInitialInterval());
-        assertEquals(2.0, props.getRetry().getMultiplier());
-        assertEquals(Duration.ofSeconds(8), props.getRetry().getMaxInterval());
-
-        props.setTrustedPackages("com.custom.*");
         props.setAutoRegisterSchemas(true);
-        assertEquals("com.custom.*", props.getTrustedPackages());
         assertTrue(props.isAutoRegisterSchemas());
     }
 

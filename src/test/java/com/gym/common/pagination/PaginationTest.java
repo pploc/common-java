@@ -22,8 +22,7 @@ class PaginationTest {
         assertTrue(protoResp.getHasMore());
         assertEquals(100, protoResp.getTotalRecords());
 
-        PaginationResponse nullProtoResp = PageMapper.toProtoResponse((CursorPage<?>) null);
-        assertNotNull(nullProtoResp);
+        assertEquals(PaginationResponse.getDefaultInstance(), PageMapper.toProtoResponse((CursorPage<?>) null));
     }
 
     @Test
@@ -39,7 +38,6 @@ class PaginationTest {
         assertEquals(5, protoResp.getTotalPages());
         assertTrue(protoResp.getHasMore());
 
-        PaginationResponse nullProtoResp = PageMapper.toProtoResponse((NormalPage<?>) null);
-        assertNotNull(nullProtoResp);
+        assertEquals(PaginationResponse.getDefaultInstance(), PageMapper.toProtoResponse((NormalPage<?>) null));
     }
 }

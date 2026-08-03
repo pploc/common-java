@@ -9,9 +9,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.util.Locale;
 import java.util.Set;
-import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
 
 /** Acknowledged byte-for-byte DLQ publisher. It never reserializes the source value. */
 public final class RawKafkaDlqPublisher implements RawDlqPublisher {
@@ -51,8 +49,6 @@ public final class RawKafkaDlqPublisher implements RawDlqPublisher {
             kafkaTemplate.send(record).get(timeoutMillis, TimeUnit.MILLISECONDS);
         } catch (InterruptedException exception) {
             Thread.currentThread().interrupt();
-            throw exception;
-        } catch (ExecutionException | TimeoutException exception) {
             throw exception;
         }
     }
