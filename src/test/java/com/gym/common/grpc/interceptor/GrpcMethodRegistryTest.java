@@ -1,13 +1,13 @@
 package com.gym.common.grpc.interceptor;
 
 import com.gym.common.grpc.security.RequireRole;
+import com.gym.common.grpc.security.RpcPolicyKind;
 import io.grpc.*;
 import io.grpc.stub.StreamObserver;
 import org.junit.jupiter.api.Test;
 import org.springframework.context.ApplicationContext;
 import org.springframework.context.event.ContextRefreshedEvent;
 
-import java.lang.reflect.Method;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -51,9 +51,7 @@ class GrpcMethodRegistryTest {
         GrpcMethodRegistry registry = new GrpcMethodRegistry(ctx);
         registry.onApplicationEvent(mock(ContextRefreshedEvent.class));
 
-        Method m = registry.getJavaMethod("dummy.DummyService/GetDummy");
-        assertNotNull(m);
-        assertEquals("getDummy", m.getName());
-        assertEquals(2, m.getParameterCount());
+        assertEquals(RpcPolicyKind.ROLE_RESTRICTED,
+                registry.getPolicy("dummy.DummyService/GetDummy").kind());
     }
 }

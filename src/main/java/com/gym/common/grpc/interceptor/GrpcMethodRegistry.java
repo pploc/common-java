@@ -26,7 +26,6 @@ public class GrpcMethodRegistry implements ApplicationListener<ContextRefreshedE
     public record MethodPolicy(RpcPolicyKind kind, String[] roles) {}
 
     private final Map<String, MethodPolicy> cache = new ConcurrentHashMap<>();
-    private final Map<String, Method> methods = new ConcurrentHashMap<>();
     private final ApplicationContext applicationContext;
 
     @Override
@@ -40,10 +39,9 @@ public class GrpcMethodRegistry implements ApplicationListener<ContextRefreshedE
                 if (method == null) {
                     throw new IllegalStateException("No handler implementation for registered gRPC method " + fullMethodName);
                 }
-                if (methods.putIfAbsent(fullMethodName, method) != null) {
+                if (cache.putIfAbsent(fullMethodName, policyFor(method, implClass, fullMethodName)) != null) {
                     throw new IllegalStateException("Duplicate gRPC method policy " + fullMethodName);
                 }
-                cache.put(fullMethodName, policyFor(method, implClass, fullMethodName));
             }
         }
     }
@@ -89,11 +87,5 @@ public class GrpcMethodRegistry implements ApplicationListener<ContextRefreshedE
 
     public MethodPolicy getPolicy(String fullMethodName) {
         return cache.get(fullMethodName);
-    }
-
-    /** Legacy lookup retained for callers migrating to explicit MethodPolicy. */
-    @Deprecated
-    public Method getJavaMethod(String fullMethodName) {
-        return methods.get(fullMethodName);
     }
 }
