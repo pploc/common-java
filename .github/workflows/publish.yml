@@ -30,8 +30,13 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: ./gradlew clean check jacocoTestCoverageVerification --no-daemon
 
-  publish:
+  kafka-contract-integration:
     needs: validate
+    uses: ./.github/workflows/kafka-contract-integration.yml
+    secrets: inherit
+
+  publish:
+    needs: [validate, kafka-contract-integration]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     environment: release
@@ -60,7 +65,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           ./gradlew clean check jacocoTestCoverageVerification --no-daemon
-          ./gradlew publish -Pversion="$RELEASE_VERSION" --no-daemon
+          ./gradlew publish --no-daemon
       - name: Write provenance evidence
         shell: bash
         run: |

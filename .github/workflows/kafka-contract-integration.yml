@@ -1,11 +1,8 @@
 name: Kafka Contract Integration
 
 on:
-  pull_request:
-    branches: [develop]
-  push:
-    branches: [develop]
   workflow_dispatch:
+  workflow_call:
 
 permissions:
   contents: read

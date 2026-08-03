@@ -6,8 +6,10 @@ import com.google.protobuf.Message;
 import com.gym.common.kafka.config.KafkaAutoConfig;
 import com.gym.common.kafka.config.KafkaEventProperties;
 import com.gym.common.kafka.consumer.ConfluentProtobufRecordDecoder;
+import com.gym.common.kafka.consumer.PermanentKafkaException;
 import com.gym.common.kafka.consumer.RawDeliveryCoordinator;
 import com.gym.common.kafka.consumer.RawKafkaHeader;
+import com.gym.common.kafka.consumer.RawKafkaListenerAdapter;
 import com.gym.common.kafka.consumer.RawKafkaRecord;
 import com.gym.common.kafka.producer.EventPublisherImpl;
 import io.opentelemetry.api.trace.Span;
@@ -18,14 +20,19 @@ import io.opentelemetry.context.Context;
 import io.opentelemetry.context.Scope;
 import org.apache.kafka.clients.consumer.Consumer;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
+import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.header.Header;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
+import org.springframework.kafka.config.ConcurrentKafkaListenerContainerFactory;
 import org.springframework.kafka.core.DefaultKafkaProducerFactory;
 import org.springframework.kafka.core.KafkaTemplate;
+import org.springframework.kafka.listener.ConcurrentMessageListenerContainer;
+import org.springframework.kafka.listener.AcknowledgingMessageListener;
+import org.springframework.kafka.listener.ContainerProperties;
 import org.springframework.kafka.support.Acknowledgment;
 import org.springframework.test.util.ReflectionTestUtils;
 
@@ -43,7 +50,11 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -183,6 +194,137 @@ class ConfluentKafkaContractIntegrationTest {
             assertArrayEquals(raw.value(), dlq.value());
             assertDlqHeaders(raw.headers(), dlq.headers(), fixture.topic());
         }
+    }
+
+    @Test
+    void givenRetryableListenerFailure_whenDeliveryEventuallySucceeds_thenAcknowledgesOnlyAfterFinalAttempt() throws InterruptedException {
+        // Given
+        FixtureCase fixture = fixtures.cases().getFirst();
+        String key = "retry-listener-" + UUID.randomUUID();
+        AtomicInteger attempts = new AtomicInteger();
+        CountDownLatch successfulAttempt = new CountDownLatch(1);
+        RawDeliveryCoordinator coordinator = new RawDeliveryCoordinator(
+                decoder,
+                record -> {
+                    if (attempts.incrementAndGet() < 3) {
+                        throw new IllegalStateException("transient");
+                    }
+                    successfulAttempt.countDown();
+                },
+                (raw, diagnostic, deliveryAttempts) -> { throw new AssertionError("successful retry must not publish DLQ"); },
+                duration -> { }
+        );
+        ConcurrentMessageListenerContainer<byte[], byte[]> container = rawListener(
+                fixture.topic(), "retry-listener", new RawKafkaListenerAdapter(coordinator)
+        );
+        try {
+            KafkaTemplate<byte[], byte[]> rawTemplate = kafkaConfig.rawKafkaTemplate(rawProducerFactory);
+            container.start();
+            assertFalse(successfulAttempt.await(100, TimeUnit.MILLISECONDS), "record must not be delivered before publish");
+
+            // When
+            rawTemplate.send(new ProducerRecord<>(
+                    fixture.topic(), null, key.getBytes(StandardCharsets.UTF_8), fixture.completeFrameBytes(), kafkaHeaders(fixture.headerList())
+            )).get();
+
+            // Then
+            assertTrue(successfulAttempt.await(POLL_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS));
+            assertEquals(3, attempts.get());
+        } catch (Exception exception) {
+            throw new AssertionError("run live retry listener proof", exception);
+        } finally {
+            container.stop();
+        }
+    }
+
+    @Test
+    void givenFailedDlqListener_whenReplacementUsesSameGroup_thenRedeliversBeforeAcknowledging() throws Exception {
+        // Given
+        FixtureCase fixture = fixtures.cases().getFirst();
+        String key = "failed-dlq-listener-" + UUID.randomUUID();
+        String group = "common-java-contract-redelivery-" + UUID.randomUUID();
+        AtomicInteger deliveries = new AtomicInteger();
+        AtomicReference<Throwable> firstListenerFailure = new AtomicReference<>();
+        CountDownLatch firstDelivery = new CountDownLatch(1);
+        CountDownLatch secondDelivery = new CountDownLatch(1);
+        AtomicBoolean failDlq = new AtomicBoolean(true);
+        KafkaTemplate<byte[], byte[]> rawTemplate = kafkaConfig.rawKafkaTemplate(rawProducerFactory);
+        var actualDlqPublisher = kafkaConfig.rawDlqPublisher(rawTemplate);
+        RawDeliveryCoordinator coordinator = new RawDeliveryCoordinator(
+                decoder,
+                record -> {
+                    deliveries.incrementAndGet();
+                    if (deliveries.get() == 1) {
+                        firstDelivery.countDown();
+                    } else {
+                        secondDelivery.countDown();
+                    }
+                    throw new PermanentKafkaException("invalid input");
+                },
+                (raw, diagnostic, attempts) -> {
+                    if (failDlq.getAndSet(false)) {
+                        throw new IllegalStateException("deliberate DLQ outage");
+                    }
+                    actualDlqPublisher.publish(raw, diagnostic, attempts);
+                },
+                duration -> { throw new AssertionError("permanent record must not retry"); }
+        );
+
+        ConcurrentMessageListenerContainer<byte[], byte[]> first = rawListener(
+                fixture.topic(), group, new RawKafkaListenerAdapter(coordinator)
+        );
+        first.setCommonErrorHandler(new org.springframework.kafka.listener.CommonErrorHandler() {
+            @Override
+            public boolean handleOne(Exception exception, ConsumerRecord<?, ?> record, Consumer<?, ?> consumer, org.springframework.kafka.listener.MessageListenerContainer container) {
+                firstListenerFailure.compareAndSet(null, exception);
+                return false;
+            }
+        });
+        first.start();
+        rawTemplate.send(new ProducerRecord<>(
+                fixture.topic(), null, key.getBytes(StandardCharsets.UTF_8), fixture.completeFrameBytes(), kafkaHeaders(fixture.headerList())
+        )).get();
+        assertTrue(firstDelivery.await(POLL_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS));
+        long deadline = System.nanoTime() + POLL_TIMEOUT.toNanos();
+        while (firstListenerFailure.get() == null && System.nanoTime() < deadline) {
+            Thread.sleep(50);
+        }
+        assertNotNull(firstListenerFailure.get());
+        first.stop();
+
+        ConcurrentMessageListenerContainer<byte[], byte[]> replacement = rawListener(
+                fixture.topic(), group, new RawKafkaListenerAdapter(coordinator)
+        );
+        try {
+            replacement.start();
+            assertTrue(secondDelivery.await(POLL_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS));
+        } finally {
+            replacement.stop();
+        }
+
+        // Then
+        assertTrue(deliveries.get() >= 2, "same-group replacement must redeliver the unacknowledged source record");
+    }
+
+    private ConcurrentMessageListenerContainer<byte[], byte[]> rawListener(
+            String topic,
+            String group,
+            RawKafkaListenerAdapter adapter
+    ) {
+        ConcurrentKafkaListenerContainerFactory<byte[], byte[]> factory = kafkaConfig.rawKafkaListenerContainerFactory(
+                kafkaConfig.rawKafkaConsumerFactory()
+        );
+        ConcurrentMessageListenerContainer<byte[], byte[]> container = factory.createContainer(topic);
+        container.getContainerProperties().setGroupId(group);
+        container.getContainerProperties().setAckMode(ContainerProperties.AckMode.MANUAL_IMMEDIATE);
+        container.setupMessageListener((AcknowledgingMessageListener<byte[], byte[]>) adapter::deliver);
+        return container;
+    }
+
+    private static org.apache.kafka.common.header.Headers kafkaHeaders(List<RawKafkaHeader> headers) {
+        org.apache.kafka.common.header.internals.RecordHeaders result = new org.apache.kafka.common.header.internals.RecordHeaders();
+        headers.forEach(header -> result.add(header.key(), header.value()));
+        return result;
     }
 
     private KafkaEventProperties properties() {

@@ -8,24 +8,14 @@ plugins {
 
 group = 'com.gym'
 
-if (System.getenv('RELEASE_VERSION')) {
-    version = System.getenv('RELEASE_VERSION')
-} else if (project.version == 'unspecified') {
-    def versionFile = file('version.properties')
-    def versionProps = new Properties()
-    if (versionFile.exists()) {
-        versionFile.withInputStream { versionProps.load(it) }
-    }
-    def major = versionProps['major'] ?: '1'
-    def minor = versionProps['minor'] ?: '0'
-    def patch = versionProps['patch'] ?: '0'
-    version = "${major}.${minor}.${patch}"
-}
+version = System.getenv('RELEASE_VERSION') ?: '2.0.0-SNAPSHOT'
 
 java {
     toolchain {
         languageVersion = JavaLanguageVersion.of(26)
     }
+    withSourcesJar()
+    withJavadocJar()
 }
 
 tasks.withType(JavaCompile).configureEach {
@@ -41,9 +31,6 @@ jar {
 }
 
 repositories {
-    if (providers.gradleProperty('useMavenLocal').isPresent()) {
-        mavenLocal()
-    }
     mavenCentral()
 
     exclusiveContent {
@@ -70,6 +57,16 @@ publishing {
     publications {
         gpr(MavenPublication) {
             from components.java
+            pom {
+                name = 'common-java'
+                description = 'Shared Java foundations for Gym microservices.'
+                url = 'https://github.com/pploc/common-java'
+                scm {
+                    url = 'https://github.com/pploc/common-java'
+                    connection = 'scm:git:https://github.com/pploc/common-java.git'
+                    developerConnection = 'scm:git:ssh://git@github.com/pploc/common-java.git'
+                }
+            }
         }
     }
     repositories {
@@ -143,6 +140,30 @@ tasks.named('test') {
         excludeTags('kafka-contract')
     }
     failOnNoDiscoveredTests = false
+}
+
+tasks.register('verifyNoLegacyKafkaTransport') {
+    group = 'verification'
+    description = 'Rejects the removed JSON-envelope Kafka transport symbols.'
+    doLast {
+        def forbidden = [
+                /\bEventEnvelope\b/,
+                /\bEventEnvelopeSerializer\b/,
+                /\bEventEnvelopeDeserializer\b/,
+                /\bEventConsumer\b/,
+                /\bRetryableConsumer\b/
+        ]
+        def matches = fileTree('src/main').matching { include '**/*.java' }.files.findAll { file ->
+            forbidden.any { pattern -> file.text =~ pattern }
+        }
+        if (!matches.isEmpty()) {
+            throw new GradleException("Removed legacy Kafka symbols found in: ${matches*.path.join(', ')}")
+        }
+    }
+}
+
+tasks.named('check') {
+    dependsOn tasks.named('verifyNoLegacyKafkaTransport')
 }
 
 tasks.register('kafkaContractIntegration', Test) {

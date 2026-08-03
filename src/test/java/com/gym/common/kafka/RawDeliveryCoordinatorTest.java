@@ -9,7 +9,9 @@ import com.gym.common.kafka.consumer.RawDeliveryCoordinator;
 import com.gym.common.kafka.consumer.RawDlqPublisher;
 import com.gym.common.kafka.consumer.RawKafkaDecoder;
 import com.gym.common.kafka.consumer.RawKafkaHeader;
+import com.gym.common.kafka.consumer.RawKafkaListenerAdapter;
 import com.gym.common.kafka.consumer.RawKafkaRecord;
+import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.junit.jupiter.api.Test;
 import org.springframework.kafka.support.Acknowledgment;
 
@@ -21,8 +23,10 @@ import java.util.concurrent.atomic.AtomicInteger;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 
 class RawDeliveryCoordinatorTest {
     @Test
@@ -60,6 +64,50 @@ class RawDeliveryCoordinatorTest {
     }
 
     @Test
+    void givenRetryableFailuresThenSuccess_whenDelivering_thenAcknowledgesOnlyAfterSuccessfulAttempt() {
+        // Given
+        Acknowledgment acknowledgment = mock(Acknowledgment.class);
+        AtomicInteger attempts = new AtomicInteger();
+        RawDeliveryCoordinator coordinator = coordinator(
+                record -> {
+                    if (attempts.incrementAndGet() < 3) {
+                        throw new IllegalStateException("transient");
+                    }
+                    verifyNoInteractions(acknowledgment);
+                },
+                (raw, diagnostic, deliveryAttempts) -> { throw new AssertionError("successful retry must not publish DLQ"); },
+                duration -> { }
+        );
+
+        // When
+        coordinator.deliver(raw(), acknowledgment);
+
+        // Then
+        assertEquals(3, attempts.get());
+        inOrder(acknowledgment).verify(acknowledgment).acknowledge();
+    }
+
+    @Test
+    void givenInterruptedBackoff_whenDelivering_thenRestoresInterruptAndLeavesSourceUnacknowledged() {
+        // Given
+        Acknowledgment acknowledgment = mock(Acknowledgment.class);
+        RawDeliveryCoordinator coordinator = coordinator(
+                record -> { throw new IllegalStateException("transient"); },
+                (raw, diagnostic, attempts) -> { throw new AssertionError("interrupted delivery must not publish DLQ"); },
+                duration -> { throw new InterruptedException("shutdown"); }
+        );
+
+        // When
+        IllegalStateException exception = assertThrows(IllegalStateException.class, () -> coordinator.deliver(raw(), acknowledgment));
+        boolean interrupted = Thread.interrupted();
+
+        // Then
+        assertEquals("Kafka delivery was interrupted before source acknowledgement", exception.getMessage());
+        assertEquals(true, interrupted);
+        verifyNoInteractions(acknowledgment);
+    }
+
+    @Test
     void givenPermanentFailure_whenDelivering_thenSkipsRetriesAndPreservesRawBytesForDlq() {
         Acknowledgment acknowledgment = mock(Acknowledgment.class);
         RawKafkaRecord raw = raw();
@@ -93,6 +141,21 @@ class RawDeliveryCoordinatorTest {
         );
 
         assertThrows(IllegalStateException.class, () -> coordinator.deliver(raw(), acknowledgment));
+    }
+
+    @Test
+    void givenRawSpringRecord_whenAdapterDelivers_thenCoordinatesManualAcknowledgement() {
+        // Given
+        Acknowledgment acknowledgment = mock(Acknowledgment.class);
+        RawKafkaListenerAdapter adapter = new RawKafkaListenerAdapter(
+                coordinator(record -> { }, (raw, diagnostic, attempts) -> { }, duration -> { })
+        );
+
+        // When
+        adapter.deliver(new ConsumerRecord<>("identity.user.registered.v1", 0, 3L, new byte[]{1}, new byte[]{2}), acknowledgment);
+
+        // Then
+        verify(acknowledgment).acknowledge();
     }
 
     @Test
