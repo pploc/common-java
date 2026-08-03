@@ -9,6 +9,7 @@ on:
 
 permissions:
   contents: read
+  packages: read
 
 env:
   GITHUB_ACTOR: ${{ github.actor }}
@@ -25,6 +26,8 @@ jobs:
           java-version: '26'
           distribution: 'corretto'
       - name: Validate Java foundation
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: ./gradlew clean check jacocoTestCoverageVerification --no-daemon
 
   publish:
