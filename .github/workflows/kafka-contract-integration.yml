@@ -43,6 +43,7 @@ jobs:
           SCHEMA_REGISTRY_LISTENERS: http://0.0.0.0:8081
           SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: PLAINTEXT://kafka:29092
     env:
+      GITHUB_ACTOR: ${{ github.actor }}
       KAFKA_BROKERS: localhost:9092
       SCHEMA_REGISTRY_URL: http://localhost:8081
       GYM_PROTO_VERSION: v1.1.0
@@ -145,6 +146,7 @@ jobs:
       - name: Run lookup-only Java Kafka contract suite
         working-directory: common-java
         env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GYM_PROTO_FIXTURE_PATH: ${{ github.workspace }}/gym-proto/contracts/v1/kafka/confluent-7.7.1-fixtures.json
         run: ./gradlew kafkaContractIntegration --no-daemon
 
