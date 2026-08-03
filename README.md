@@ -13,9 +13,10 @@ Auto-configures standard gRPC server interceptor beans for microservices:
 - **Exception Mapping**: Translates `DomainException` to gRPC `Status` codes with header details.
 
 ### 2. Kafka Messaging
-Synchronous Event Publisher ensuring atomic database-and-message operations.
-- **Phase 0 Wire Contract**: Concrete Protobuf values must use Confluent Schema Registry framing with TopicNameStrategy (`<topic>-value`) and BACKWARD compatibility. Event metadata is defined by the versioned `gym-proto/contracts/v1` fixtures. The existing JSON `EventEnvelope` transport is a legacy implementation to be migrated before the contract is released.
-- **Phase 0 Error Handling & DLQ Contract**: Initial handling plus retries after 2s, 4s, and 8s; after the third retry fails, preserve the original key, framed value, and headers in `{topic}.DLQ`. Commit the original offset only after handler success or confirmed DLQ publication.
+Acknowledged, concrete-Protobuf Kafka publication. This library provides at-least-once transport only; services retain transactional outbox and idempotency responsibilities.
+- **Wire contract**: Concrete Protobuf values use Confluent Schema Registry framing with `TopicNameStrategy` (`<topic>-value`), `BACKWARD` compatibility, and production `auto.register.schemas=false`. Canonical event metadata and the nine supported topic/type pairs are defined by `gym-proto/contracts/v1` fixtures.
+- **Retry and DLQ**: Initial handling plus retries after 2s, 4s, and 8s. `{topic}.DLQ` preserves original key, framed value, and headers; the source offset commits only after handler success or confirmed DLQ publication. Failed DLQ publication leaves the source record uncommitted.
+- **v2 migration**: The stable v2 line removes the undeployed JSON `EventEnvelope` transport. No JSON migration adapter is supplied because no JSON Kafka generation was deployed.
 
 ### 3. Pagination
 - **CursorPage / CursorUtils**: URL-safe base64 keyset pagination helper (supporting compound fields).

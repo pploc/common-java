@@ -59,7 +59,7 @@ class AuthServerInterceptorTest {
         ServerCall<com.google.protobuf.Empty, com.google.protobuf.Empty> call = mock(ServerCall.class);
         MethodDescriptor<com.google.protobuf.Empty, com.google.protobuf.Empty> md = MethodDescriptor.<com.google.protobuf.Empty, com.google.protobuf.Empty>newBuilder()
                 .setType(MethodDescriptor.MethodType.UNARY)
-                .setFullMethodName("unsecured.Service/UnsecuredMethod")
+                .setFullMethodName("secured.SecuredService/AdminOnly")
                 .setRequestMarshaller(io.grpc.protobuf.ProtoUtils.marshaller(com.google.protobuf.Empty.getDefaultInstance()))
                 .setResponseMarshaller(io.grpc.protobuf.ProtoUtils.marshaller(com.google.protobuf.Empty.getDefaultInstance()))
                 .build();
@@ -67,14 +67,14 @@ class AuthServerInterceptorTest {
 
         Metadata headers = new Metadata();
         headers.put(Metadata.Key.of("x-user-id", Metadata.ASCII_STRING_MARSHALLER), "u-10");
-        headers.put(Metadata.Key.of("x-user-role", Metadata.ASCII_STRING_MARSHALLER), "MEMBER");
+        headers.put(Metadata.Key.of("x-user-role", Metadata.ASCII_STRING_MARSHALLER), "ADMIN");
 
         AtomicBoolean executed = new AtomicBoolean(false);
         ServerCallHandler<com.google.protobuf.Empty, com.google.protobuf.Empty> next = (c, h) -> {
             UserClaims claims = GrpcSecurityContext.getCurrentClaims();
             assertNotNull(claims);
             assertEquals("u-10", claims.userId());
-            assertEquals("MEMBER", claims.role());
+            assertEquals("ADMIN", claims.role());
             executed.set(true);
             return new ServerCall.Listener<>() {};
         };
@@ -113,7 +113,7 @@ class AuthServerInterceptorTest {
 
         Metadata headers = new Metadata();
         headers.put(Metadata.Key.of("x-user-id", Metadata.ASCII_STRING_MARSHALLER), "u-10");
-        headers.put(Metadata.Key.of("x-user-role", Metadata.ASCII_STRING_MARSHALLER), "MEMBER");
+        headers.put(Metadata.Key.of("x-user-role", Metadata.ASCII_STRING_MARSHALLER), "CUSTOMER");
 
         interceptor.interceptCall(call, headers, (c, h) -> null);
         verify(call).close(argThat(status -> status.getCode() == Status.Code.PERMISSION_DENIED), any());

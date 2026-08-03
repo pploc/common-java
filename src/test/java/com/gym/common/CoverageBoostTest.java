@@ -7,53 +7,15 @@ import com.gym.common.grpc.interceptor.ExceptionInterceptor;
 import com.gym.common.grpc.interceptor.LoggingInterceptor;
 import com.gym.common.grpc.interceptor.TracingInterceptor;
 import com.gym.common.grpc.security.GrpcSecurityContext;
-import com.gym.common.kafka.config.KafkaAutoConfig;
-import com.gym.common.kafka.config.KafkaEventProperties;
-import com.gym.common.kafka.consumer.RetryableConsumer;
-import com.gym.common.kafka.message.EventEnvelope;
-import com.gym.common.kafka.message.EventEnvelopeDeserializer;
-import com.gym.common.kafka.message.EventEnvelopeSerializer;
 import com.gym.common.pagination.CursorUtils;
 import io.grpc.*;
-import org.apache.kafka.clients.consumer.ConsumerRecord;
-import org.apache.kafka.common.header.Headers;
-import org.apache.kafka.common.header.internals.RecordHeaders;
 import org.junit.jupiter.api.Test;
-import org.springframework.kafka.core.KafkaTemplate;
-import org.springframework.kafka.listener.DefaultErrorHandler;
 
-import java.nio.charset.StandardCharsets;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 class CoverageBoostTest {
-
-    @Test
-    void testKafkaAutoConfigErrorHandlerHeadersFunction() {
-        ConsumerRecord<String, Object> recordWithRetry = new ConsumerRecord<>("topic-1", 0, 0L, "k", "v");
-        recordWithRetry.headers().add(KafkaAutoConfig.HEADER_RETRY_COUNT, "2".getBytes(StandardCharsets.UTF_8));
-        Headers h1 = KafkaAutoConfig.createDlqHeaders(recordWithRetry, new RuntimeException("Error msg", new RuntimeException("Cause msg")));
-        assertNotNull(h1);
-        assertEquals("3", new String(h1.lastHeader(KafkaAutoConfig.HEADER_RETRY_COUNT).value(), StandardCharsets.UTF_8));
-
-        ConsumerRecord<String, Object> recordNoRetry = new ConsumerRecord<>("topic-1", 0, 0L, "k", "v");
-        Headers h2 = KafkaAutoConfig.createDlqHeaders(recordNoRetry, new RuntimeException((String) null));
-        assertNotNull(h2);
-        assertEquals("RuntimeException", new String(
-                h2.lastHeader(KafkaAutoConfig.HEADER_EXCEPTION_MESSAGE).value(),
-                StandardCharsets.UTF_8
-        ));
-
-        ConsumerRecord<String, Object> recordWithMalformedRetry = new ConsumerRecord<>("topic-1", 0, 0L, "k", "v");
-        recordWithMalformedRetry.headers().add(KafkaAutoConfig.HEADER_RETRY_COUNT, "not-a-number".getBytes(StandardCharsets.UTF_8));
-        Headers h3 = KafkaAutoConfig.createDlqHeaders(recordWithMalformedRetry, new RuntimeException("secret detail"));
-        assertEquals("1", new String(h3.lastHeader(KafkaAutoConfig.HEADER_RETRY_COUNT).value(), StandardCharsets.UTF_8));
-        assertEquals("RuntimeException", new String(
-                h3.lastHeader(KafkaAutoConfig.HEADER_EXCEPTION_MESSAGE).value(),
-                StandardCharsets.UTF_8
-        ));
-    }
 
     @Test
     void testLoggingAndTracingListenersFullCoverage() {
@@ -138,19 +100,6 @@ class CoverageBoostTest {
     }
 
     @Test
-    void testRetryableConsumerHandleProcessingError() {
-        RetryableConsumer<Empty> consumer = new RetryableConsumer<>() {
-            @Override
-            public void onMessage(EventEnvelope<Empty> envelope) {
-                handleProcessingError(envelope, new RuntimeException("Processing failed"));
-            }
-        };
-
-        EventEnvelope<Empty> env = new EventEnvelope<>("Type", "K", Empty.getDefaultInstance(), 0L, "T", "S");
-        assertThrows(RuntimeException.class, () -> consumer.onMessage(env));
-    }
-
-    @Test
     void testConstructorsAndInstantiation() {
         assertNotNull(new CommonAutoConfiguration());
         assertNotNull(new GrpcSecurityContext());
@@ -164,12 +113,4 @@ class CoverageBoostTest {
         assertNotNull(new ConflictException(ec, "msg", new RuntimeException()));
     }
 
-    @Test
-    void testEventEnvelopeDeserializerEdgeCases() throws Exception {
-        EventEnvelopeDeserializer deserializer = new EventEnvelopeDeserializer();
-        assertNotNull(deserializer);
-
-        EventEnvelopeSerializer serializer = new EventEnvelopeSerializer();
-        assertNotNull(serializer);
-    }
 }

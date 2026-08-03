@@ -1,0 +1,174 @@
+name: Kafka Contract Integration
+
+on:
+  pull_request:
+    branches: [develop]
+  push:
+    branches: [develop]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  kafka-contract-integration:
+    runs-on: ubuntu-latest
+    services:
+      kafka:
+        image: confluentinc/cp-kafka:7.7.1
+        ports:
+          - 9092:9092
+        env:
+          KAFKA_NODE_ID: "1"
+          KAFKA_PROCESS_ROLES: broker,controller
+          KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:29093
+          KAFKA_LISTENERS: PLAINTEXT://kafka:29092,CONTROLLER://kafka:29093,PLAINTEXT_HOST://0.0.0.0:9092
+          KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+          KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+          KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+          KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+          KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: "1"
+          KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: "1"
+          KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: "1"
+          KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: "0"
+          KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+          CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
+      schema-registry:
+        image: confluentinc/cp-schema-registry:7.7.1
+        ports:
+          - 8081:8081
+        env:
+          SCHEMA_REGISTRY_HOST_NAME: schema-registry
+          SCHEMA_REGISTRY_LISTENERS: http://0.0.0.0:8081
+          SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: PLAINTEXT://kafka:29092
+    env:
+      KAFKA_BROKERS: localhost:9092
+      SCHEMA_REGISTRY_URL: http://localhost:8081
+      GYM_PROTO_VERSION: v1.1.0
+      GYM_PROTO_SHA: 740e476915117ab594a6e7ee3677e6a2c39c3c80
+      GYM_PROTO_FIXTURE_SHA256: e5a5d0944229c9e0c97dc5e872f01e7597993e5732f2014b7d8e5efdf965a27e
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: common-java
+          fetch-depth: 1
+
+      - uses: actions/checkout@v4
+        with:
+          repository: pploc/gym-proto
+          ref: v1.1.0
+          path: gym-proto
+          fetch-depth: 0
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: corretto
+          java-version: "26"
+
+      - name: Verify immutable protobuf input
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C gym-proto rev-parse HEAD)" = "$GYM_PROTO_SHA"
+          test "$(git -C gym-proto rev-parse "${GYM_PROTO_VERSION}^{commit}")" = "$GYM_PROTO_SHA"
+          test "$(sha256sum gym-proto/contracts/v1/kafka/confluent-7.7.1-fixtures.json | cut -d ' ' -f1)" = "$GYM_PROTO_FIXTURE_SHA256"
+
+      - name: Wait for Schema Registry
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in {1..60}; do
+            curl --fail --silent "$SCHEMA_REGISTRY_URL/subjects" >/dev/null && exit 0
+            sleep 2
+          done
+          echo "Schema Registry did not become ready" >&2
+          exit 1
+
+      - name: Seed and verify immutable Confluent fixtures
+        working-directory: gym-proto
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(curl --fail --silent "$SCHEMA_REGISTRY_URL/subjects" | jq length)" -eq 0
+          cp contracts/v1/kafka/confluent-7.7.1-fixtures.json /tmp/committed-fixtures.json
+          ./gradlew generateConfluentFixtures -PschemaRegistryUrl="$SCHEMA_REGISTRY_URL" --no-daemon
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          committed = json.loads(Path('/tmp/committed-fixtures.json').read_text())
+          generated = json.loads(Path('contracts/v1/kafka/confluent-7.7.1-fixtures.json').read_text())
+          committed['generatedBy']['schemaRegistryUrl'] = '<registry-url>'
+          generated['generatedBy']['schemaRegistryUrl'] = '<registry-url>'
+          if committed != generated:
+              raise SystemExit('generated Confluent fixtures differ from the immutable artifact')
+          PY
+          ./gradlew check -PschemaRegistryUrl="$SCHEMA_REGISTRY_URL" --no-daemon
+          ./gradlew verifyConfluentBackwardCompatibility -PschemaRegistryUrl="$SCHEMA_REGISTRY_URL" --no-daemon
+          test "$(curl --fail --silent "$SCHEMA_REGISTRY_URL/subjects" | jq length)" -eq 9
+          jq -r '.cases[].subject' contracts/v1/kafka/confluent-7.7.1-fixtures.json | while read -r subject; do
+            test "$(curl --fail --silent "$SCHEMA_REGISTRY_URL/config/$subject" | jq -r '.compatibilityLevel')" = BACKWARD
+          done
+
+      - name: Snapshot seeded Registry
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p common-java/evidence/registry-before
+          curl --fail --silent "$SCHEMA_REGISTRY_URL/subjects" | jq -S . > common-java/evidence/registry-before/subjects.json
+          jq -r '.[]' common-java/evidence/registry-before/subjects.json | while read -r subject; do
+            encoded_subject="$(jq -rn --arg subject "$subject" '$subject|@uri')"
+            curl --fail --silent "$SCHEMA_REGISTRY_URL/subjects/$encoded_subject/versions" | jq -S . > "common-java/evidence/registry-before/$subject.versions.json"
+            curl --fail --silent "$SCHEMA_REGISTRY_URL/subjects/$encoded_subject/versions/latest" | jq -S '{id,version,schemaType}' > "common-java/evidence/registry-before/$subject.schema.json"
+          done
+
+      - name: Run lookup-only Java Kafka contract suite
+        working-directory: common-java
+        env:
+          GYM_PROTO_FIXTURE_PATH: ${{ github.workspace }}/gym-proto/contracts/v1/kafka/confluent-7.7.1-fixtures.json
+        run: ./gradlew kafkaContractIntegration --no-daemon
+
+      - name: Verify no Schema Registry mutation
+        if: success()
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p common-java/evidence/registry-after
+          curl --fail --silent "$SCHEMA_REGISTRY_URL/subjects" | jq -S . > common-java/evidence/registry-after/subjects.json
+          jq -r '.[]' common-java/evidence/registry-after/subjects.json | while read -r subject; do
+            encoded_subject="$(jq -rn --arg subject "$subject" '$subject|@uri')"
+            curl --fail --silent "$SCHEMA_REGISTRY_URL/subjects/$encoded_subject/versions" | jq -S . > "common-java/evidence/registry-after/$subject.versions.json"
+            curl --fail --silent "$SCHEMA_REGISTRY_URL/subjects/$encoded_subject/versions/latest" | jq -S '{id,version,schemaType}' > "common-java/evidence/registry-after/$subject.schema.json"
+          done
+          diff -ru common-java/evidence/registry-before common-java/evidence/registry-after
+
+      - name: Create sanitized contract evidence
+        if: always()
+        working-directory: common-java
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          git rev-parse HEAD > evidence/common-java-source-sha.txt
+          git -C ../gym-proto rev-parse HEAD > evidence/gym-proto-source-sha.txt
+          printf '%s\n' "$GYM_PROTO_VERSION" > evidence/gym-proto-tag.txt
+          printf '%s\n' "$GYM_PROTO_FIXTURE_SHA256" > evidence/fixture.sha256
+          curl --fail --silent "$SCHEMA_REGISTRY_URL/subjects" | jq -S . > evidence/schema-registry-subjects.json || true
+          if [[ -f evidence/schema-registry-subjects.json ]]; then
+            jq -r '.[]' evidence/schema-registry-subjects.json | while read -r subject; do
+              encoded_subject="$(jq -rn --arg subject "$subject" '$subject|@uri')"
+              curl --fail --silent "$SCHEMA_REGISTRY_URL/config/$encoded_subject" | jq -S . > "evidence/$subject.compatibility.json" || true
+            done
+          fi
+
+      - name: Upload contract evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: common-java-kafka-contract-${{ github.sha }}
+          path: |
+            common-java/evidence/
+            common-java/build/test-results/kafkaContractIntegration/
+            common-java/build/reports/tests/kafkaContractIntegration/
+          if-no-files-found: warn

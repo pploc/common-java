@@ -2,8 +2,10 @@ package com.gym.common.kafka.producer;
 
 import com.google.protobuf.Message;
 import com.gym.common.error.EventPublishFailedException;
+import com.gym.common.kafka.KafkaContract;
 import com.gym.common.kafka.config.KafkaEventProperties;
 import io.opentelemetry.api.trace.Span;
+import io.opentelemetry.api.trace.SpanContext;
 import io.opentelemetry.api.trace.propagation.W3CTraceContextPropagator;
 import io.opentelemetry.context.Context;
 import lombok.extern.slf4j.Slf4j;
@@ -20,56 +22,41 @@ import java.time.Instant;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
+/** Acknowledged concrete-Protobuf publisher for the frozen v1 topic set. */
 @Slf4j
 @Component
 public class EventPublisherImpl implements EventPublisher {
+    public static final String HEADER_EVENT_TYPE = KafkaContract.HEADER_EVENT_TYPE;
+    public static final String HEADER_SOURCE = KafkaContract.HEADER_SOURCE;
+    public static final String HEADER_TIMESTAMP = KafkaContract.HEADER_TIMESTAMP;
+    public static final String HEADER_EVENT_ID = KafkaContract.HEADER_EVENT_ID;
+    public static final String HEADER_TRACEPARENT = KafkaContract.HEADER_TRACEPARENT;
+    public static final String HEADER_TRACESTATE = KafkaContract.HEADER_TRACESTATE;
+    public static final String HEADER_TRACE_ID = KafkaContract.HEADER_TRACE_ID;
 
-    public static final String HEADER_EVENT_TYPE = "event-type";
-    public static final String HEADER_SOURCE = "source";
-    public static final String HEADER_TIMESTAMP = "timestamp";
-    public static final String HEADER_EVENT_ID = "event-id";
-    public static final String HEADER_TRACEPARENT = "traceparent";
-    public static final String HEADER_TRACESTATE = "tracestate";
-    public static final String HEADER_TRACE_ID = "x-trace-id";
-
-    private static final Set<String> RESERVED_HEADERS = Set.of(
-            HEADER_EVENT_TYPE,
-            HEADER_SOURCE,
-            HEADER_TIMESTAMP,
-            HEADER_EVENT_ID,
-            HEADER_TRACEPARENT,
-            HEADER_TRACESTATE,
-            HEADER_TRACE_ID
-    );
-
-    private final KafkaTemplate<String, Object> kafkaTemplate;
+    private final KafkaTemplate<String, Message> kafkaTemplate;
     private final String applicationName;
     private final KafkaEventProperties kafkaEventProperties;
     private final Clock clock;
 
     @Autowired
-    public EventPublisherImpl(
-            KafkaTemplate<String, Object> kafkaTemplate,
-            @Value("${spring.application.name:unknown-service}") String applicationName,
-            KafkaEventProperties kafkaEventProperties) {
+    public EventPublisherImpl(KafkaTemplate<String, Message> kafkaTemplate,
+                              @Value("${spring.application.name:unknown-service}") String applicationName,
+                              KafkaEventProperties kafkaEventProperties) {
         this(kafkaTemplate, applicationName, kafkaEventProperties, Clock.systemUTC());
     }
 
-    public EventPublisherImpl(
-            KafkaTemplate<String, Object> kafkaTemplate,
-            String applicationName,
-            KafkaEventProperties kafkaEventProperties,
-            Clock clock) {
-        this.kafkaTemplate = kafkaTemplate;
+    public EventPublisherImpl(KafkaTemplate<String, Message> kafkaTemplate, String applicationName,
+                              KafkaEventProperties kafkaEventProperties, Clock clock) {
+        this.kafkaTemplate = Objects.requireNonNull(kafkaTemplate, "kafkaTemplate");
         this.applicationName = applicationName;
-        this.kafkaEventProperties = kafkaEventProperties;
-        this.clock = clock != null ? clock : Clock.systemUTC();
+        this.kafkaEventProperties = Objects.requireNonNull(kafkaEventProperties, "kafkaEventProperties");
+        this.clock = clock == null ? Clock.systemUTC() : clock;
     }
 
     @Override
@@ -88,69 +75,74 @@ public class EventPublisherImpl implements EventPublisher {
         Objects.requireNonNull(payload, "Payload cannot be null");
         Objects.requireNonNull(eventId, "Event ID cannot be null");
         Objects.requireNonNull(headers, "Headers cannot be null");
-        if (topic.isBlank()) {
-            throw new IllegalArgumentException("Topic cannot be blank");
-        }
-        if (applicationName == null || applicationName.isBlank()) {
-            throw new IllegalStateException("Kafka event source cannot be blank");
-        }
-        if (eventId.isBlank()) {
-            throw new IllegalArgumentException("Event ID cannot be blank");
-        }
+        validate(topic, payload, eventId);
 
-        var spanContext = Span.current().getSpanContext();
-        long timestamp = Instant.now(clock).toEpochMilli();
-        String eventType = payload.getDescriptorForType().getFullName();
-
-        // A Protobuf Kafka serializer configured by KafkaAutoConfig applies the
-        // Schema Registry framing. The transport value is never a JSON envelope.
-        ProducerRecord<String, Object> record = new ProducerRecord<>(topic, key, payload);
-
-        record.headers().add(new RecordHeader(HEADER_EVENT_TYPE, eventType.getBytes(StandardCharsets.UTF_8)));
-        record.headers().add(new RecordHeader(HEADER_SOURCE, applicationName.getBytes(StandardCharsets.UTF_8)));
-        record.headers().add(new RecordHeader(HEADER_TIMESTAMP, String.valueOf(timestamp).getBytes(StandardCharsets.UTF_8)));
-        record.headers().add(new RecordHeader(HEADER_EVENT_ID, eventId.getBytes(StandardCharsets.UTF_8)));
-        if (spanContext.isValid()) {
-            W3CTraceContextPropagator.getInstance().inject(
-                    Context.current(),
-                    record.headers(),
-                    (carrier, headerKey, value) -> carrier.add(
-                            new RecordHeader(headerKey, value.getBytes(StandardCharsets.UTF_8))
-                    )
-            );
-        } else {
-            String fallbackTraceId = headers.get(HEADER_TRACE_ID);
-            if (fallbackTraceId != null && !fallbackTraceId.isBlank()) {
-                record.headers().add(new RecordHeader(HEADER_TRACE_ID, fallbackTraceId.getBytes(StandardCharsets.UTF_8)));
-            }
-        }
-
+        ProducerRecord<String, Message> record = new ProducerRecord<>(topic, key, payload);
+        add(record, HEADER_EVENT_TYPE, payload.getDescriptorForType().getFullName());
+        add(record, HEADER_SOURCE, applicationName.trim());
+        add(record, HEADER_TIMESTAMP, Long.toString(Instant.now(clock).toEpochMilli()));
+        add(record, HEADER_EVENT_ID, eventId.trim());
+        injectTrace(record, headers);
         headers.forEach((headerKey, value) -> {
-            if (headerKey == null) {
-                throw new IllegalArgumentException("Kafka header name cannot be null");
-            }
-            String normalizedKey = headerKey.toLowerCase(Locale.ROOT);
-            if (RESERVED_HEADERS.contains(normalizedKey)) {
-                if (!HEADER_TRACE_ID.equals(normalizedKey) || spanContext.isValid()) {
-                    throw new IllegalArgumentException("Caller cannot override canonical Kafka header: " + headerKey);
-                }
-                return;
-            }
-            if (value != null) {
-                record.headers().add(new RecordHeader(headerKey, value.getBytes(StandardCharsets.UTF_8)));
+            if (!HEADER_TRACE_ID.equalsIgnoreCase(headerKey)) {
+                addCallerHeader(record, headerKey, value);
             }
         });
 
-        long timeoutMs = kafkaEventProperties.getPublishTimeout().toMillis();
         try {
-            kafkaTemplate.send(record).get(timeoutMs, TimeUnit.MILLISECONDS);
-            log.info("Published event type {} to {} with event ID {}", eventType, topic, eventId);
-        } catch (InterruptedException e) {
+            kafkaTemplate.send(record).get(kafkaEventProperties.getPublishTimeout().toMillis(), TimeUnit.MILLISECONDS);
+            log.info("Published Kafka event: type={}, topic={}", payload.getDescriptorForType().getFullName(), topic);
+        } catch (InterruptedException exception) {
             Thread.currentThread().interrupt();
-            throw EventPublishFailedException.of(eventType, e);
-        } catch (ExecutionException | TimeoutException e) {
-            throw EventPublishFailedException.of(eventType, e);
+            throw EventPublishFailedException.of(payload.getDescriptorForType().getFullName(), exception);
+        } catch (ExecutionException | TimeoutException exception) {
+            throw EventPublishFailedException.of(payload.getDescriptorForType().getFullName(), exception);
         }
     }
-}
 
+    private void validate(String topic, Message payload, String eventId) {
+        if (topic.isBlank() || applicationName == null || applicationName.isBlank() || eventId.isBlank()) {
+            throw new IllegalArgumentException("Kafka topic, source, and event ID are required");
+        }
+        KafkaContract.requireFrozenPair(topic, payload);
+        if (kafkaEventProperties.isAutoRegisterSchemas()) {
+            throw new IllegalStateException("Production Kafka publishing must disable schema auto-registration");
+        }
+    }
+
+    private static void add(ProducerRecord<String, Message> record, String key, String value) {
+        record.headers().add(new RecordHeader(key, value.getBytes(StandardCharsets.UTF_8)));
+    }
+
+    private static void addCallerHeader(ProducerRecord<String, Message> record, String headerKey, String value) {
+        if (headerKey == null) {
+            throw new IllegalArgumentException("Kafka header name cannot be null");
+        }
+        if (KafkaContract.RESERVED_HEADERS.contains(headerKey.trim().toLowerCase(Locale.ROOT))) {
+            throw new IllegalArgumentException("Caller cannot override canonical Kafka header: " + headerKey);
+        }
+        if (value != null) {
+            add(record, headerKey, value);
+        }
+    }
+
+    private static void injectTrace(ProducerRecord<String, Message> record, Map<String, String> headers) {
+        SpanContext spanContext = Span.current().getSpanContext();
+        if (spanContext.isValid()) {
+            W3CTraceContextPropagator.getInstance().inject(Context.current(), record.headers(),
+                    (carrier, key, value) -> carrier.add(new RecordHeader(key, value.getBytes(StandardCharsets.UTF_8))));
+        } else {
+            add(record, HEADER_TRACEPARENT, newRootTraceparent());
+            String fallback = headers.get(HEADER_TRACE_ID);
+            if (fallback != null && !fallback.isBlank()) {
+                add(record, HEADER_TRACE_ID, fallback.trim());
+            }
+        }
+    }
+
+    private static String newRootTraceparent() {
+        String traceId = UUID.randomUUID().toString().replace("-", "");
+        String spanId = UUID.randomUUID().toString().replace("-", "").substring(0, 16);
+        return "00-" + traceId + "-" + spanId + "-01";
+    }
+}

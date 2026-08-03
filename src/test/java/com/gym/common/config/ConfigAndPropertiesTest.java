@@ -1,15 +1,17 @@
 package com.gym.common.config;
 
+import com.google.protobuf.Message;
 import com.gym.common.grpc.config.GrpcProperties;
 import com.gym.common.grpc.config.GrpcServerAutoConfig;
 import com.gym.common.grpc.interceptor.GrpcMethodRegistry;
-import com.gym.common.kafka.config.KafkaEventProperties;
 import com.gym.common.kafka.config.KafkaAutoConfig;
-import org.junit.jupiter.api.Test;
-import io.confluent.kafka.serializers.protobuf.KafkaProtobufDeserializer;
+import com.gym.common.kafka.config.KafkaEventProperties;
 import io.confluent.kafka.serializers.protobuf.KafkaProtobufSerializer;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.producer.ProducerConfig;
+import org.apache.kafka.common.serialization.ByteArrayDeserializer;
+import org.apache.kafka.common.serialization.ByteArraySerializer;
+import org.junit.jupiter.api.Test;
 import org.springframework.kafka.core.DefaultKafkaConsumerFactory;
 import org.springframework.kafka.core.DefaultKafkaProducerFactory;
 import org.springframework.kafka.core.KafkaTemplate;
@@ -17,11 +19,13 @@ import org.springframework.kafka.core.KafkaTemplate;
 import java.time.Duration;
 import java.util.Map;
 
-import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.Mockito.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.mock;
 
 class ConfigAndPropertiesTest {
-
     @Test
     void testGrpcProperties() {
         GrpcProperties properties = new GrpcProperties();
@@ -74,33 +78,32 @@ class ConfigAndPropertiesTest {
     }
 
     @Test
-    void testKafkaAutoConfigBeans() {
+    void givenKafkaConfiguration_whenBuildingTransportBeans_thenSeparatesProtobufAndRawBytePaths() {
         KafkaEventProperties props = new KafkaEventProperties();
         KafkaAutoConfig config = new KafkaAutoConfig(props);
         org.springframework.test.util.ReflectionTestUtils.setField(config, "bootstrapServers", "localhost:9092");
 
-        DefaultKafkaProducerFactory<String, Object> producerFactory =
-                (DefaultKafkaProducerFactory<String, Object>) config.producerFactory();
-        Map<String, Object> producerConfig = producerFactory.getConfigurationProperties();
-        assertEquals(KafkaProtobufSerializer.class, producerConfig.get(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG));
-        assertEquals("all", producerConfig.get(ProducerConfig.ACKS_CONFIG));
-        assertEquals(true, producerConfig.get(ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG));
-        assertEquals(false, producerConfig.get("auto.register.schemas"));
-        assertEquals("io.confluent.kafka.serializers.subject.TopicNameStrategy",
-                producerConfig.get("value.subject.name.strategy"));
+        DefaultKafkaProducerFactory<String, Message> protobufFactory =
+                (DefaultKafkaProducerFactory<String, Message>) config.producerFactory();
+        Map<String, Object> protobufConfig = protobufFactory.getConfigurationProperties();
+        assertEquals(KafkaProtobufSerializer.class, protobufConfig.get(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG));
+        assertEquals("all", protobufConfig.get(ProducerConfig.ACKS_CONFIG));
+        assertEquals(true, protobufConfig.get(ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG));
+        assertEquals(false, protobufConfig.get("auto.register.schemas"));
 
-        KafkaTemplate<String, Object> template = config.kafkaTemplate(producerFactory);
+        KafkaTemplate<String, Message> template = config.kafkaTemplate(protobufFactory);
         assertNotNull(template);
 
-        DefaultKafkaConsumerFactory<String, Object> consumerFactory =
-                (DefaultKafkaConsumerFactory<String, Object>) config.consumerFactory();
-        Map<String, Object> consumerConfig = consumerFactory.getConfigurationProperties();
-        assertEquals(KafkaProtobufDeserializer.class,
-                consumerConfig.get("spring.deserializer.value.delegate.class"));
-        assertEquals(false, consumerConfig.get(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG));
-        assertEquals(false, consumerConfig.get("auto.register.schemas"));
+        DefaultKafkaProducerFactory<byte[], byte[]> rawProducerFactory =
+                (DefaultKafkaProducerFactory<byte[], byte[]>) config.rawKafkaProducerFactory();
+        assertEquals(ByteArraySerializer.class,
+                rawProducerFactory.getConfigurationProperties().get(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG));
 
-        assertNotNull(config.errorHandler(template));
-        assertNotNull(config.kafkaListenerContainerFactory(consumerFactory, config.errorHandler(template)));
+        DefaultKafkaConsumerFactory<byte[], byte[]> rawConsumerFactory =
+                (DefaultKafkaConsumerFactory<byte[], byte[]>) config.rawKafkaConsumerFactory();
+        Map<String, Object> rawConsumerConfig = rawConsumerFactory.getConfigurationProperties();
+        assertEquals(ByteArrayDeserializer.class, rawConsumerConfig.get(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG));
+        assertEquals(false, rawConsumerConfig.get(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG));
+        assertNotNull(config.rawKafkaListenerContainerFactory(rawConsumerFactory));
     }
 }

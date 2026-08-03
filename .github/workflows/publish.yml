@@ -2,61 +2,69 @@ name: Validate and Publish Package
 
 on:
   pull_request:
-    branches: [develop, main]
+    branches: [develop]
   push:
-    branches: [develop, main]
+    branches: [develop]
     tags: ["v*"]
 
 permissions:
   contents: read
-  packages: write
 
 env:
   GITHUB_ACTOR: ${{ github.actor }}
-  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
 jobs:
   validate:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up JDK 26
-        uses: actions/setup-java@v4
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-java@v4
         with:
           java-version: '26'
           distribution: 'corretto'
-
-      - name: Make gradlew executable
-        run: chmod +x gradlew
-
-      - name: Build Java package
-        run: ./gradlew build
+      - name: Validate Java foundation
+        run: ./gradlew clean check jacocoTestCoverageVerification --no-daemon
 
   publish:
     needs: validate
-    if: github.event_name == 'push'
+    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: read
+      packages: write
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
           ref: ${{ github.ref }}
-
-      - name: Set up JDK 26
-        uses: actions/setup-java@v4
+      - uses: actions/setup-java@v4
         with:
           java-version: '26'
           distribution: 'corretto'
-
-      - name: Publish to GitHub Packages
+      - name: Validate tag-derived version
+        shell: bash
         run: |
-          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
-            VERSION="${GITHUB_REF#refs/tags/v}"
-          else
-            VERSION="1.0.${{ github.run_number }}"
-          fi
-          echo "Publishing version ${VERSION} to GitHub Packages..."
-          ./gradlew publish -Pversion="${VERSION}"
+          set -euo pipefail
+          version="${GITHUB_REF#refs/tags/v}"
+          test -n "$version"
+          test "$(git tag --points-at HEAD | grep -Fx "v$version")" = "v$version"
+          echo "RELEASE_VERSION=$version" >> "$GITHUB_ENV"
+      - name: Validate and publish immutable package
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          ./gradlew clean check jacocoTestCoverageVerification --no-daemon
+          ./gradlew publish -Pversion="$RELEASE_VERSION" --no-daemon
+      - name: Write provenance evidence
+        shell: bash
+        run: |
+          mkdir -p evidence
+          git rev-parse HEAD > evidence/source-sha.txt
+          sha256sum build/libs/*.jar > evidence/artifacts.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: common-java-release-evidence-${{ github.sha }}
+          path: evidence/

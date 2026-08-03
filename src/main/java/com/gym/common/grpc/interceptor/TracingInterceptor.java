@@ -47,7 +47,7 @@ public class TracingInterceptor implements ServerInterceptor {
             public void close(Status status, Metadata trailers) {
                 span.setAttribute("grpc.status_code", status.getCode().value());
                 if (!status.isOk()) {
-                    span.setStatus(io.opentelemetry.api.trace.StatusCode.ERROR, status.getDescription());
+                    span.setStatus(io.opentelemetry.api.trace.StatusCode.ERROR, status.getCode().name());
                 } else {
                     span.setStatus(io.opentelemetry.api.trace.StatusCode.OK);
                 }

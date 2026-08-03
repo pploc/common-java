@@ -1,11 +1,10 @@
 package com.gym.common.kafka;
 
-import com.google.protobuf.Empty;
+import com.google.protobuf.Message;
 import com.gym.common.error.EventPublishFailedException;
 import com.gym.common.kafka.config.KafkaEventProperties;
-import com.gym.common.kafka.consumer.RetryableConsumer;
-import com.gym.common.kafka.message.EventEnvelope;
 import com.gym.common.kafka.producer.EventPublisherImpl;
+import com.gym.proto.events.v1.UserRegisteredEvent;
 import io.opentelemetry.api.trace.Span;
 import io.opentelemetry.api.trace.SpanContext;
 import io.opentelemetry.api.trace.TraceFlags;
@@ -26,7 +25,6 @@ import java.time.ZoneOffset;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 
-import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
@@ -37,30 +35,32 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class KafkaAndPublisherTest {
+    private static final String TOPIC = "identity.user.registered.v1";
+    private static final UserRegisteredEvent EVENT = UserRegisteredEvent.getDefaultInstance();
 
     @Test
-    void testEventPublisherImplPublishesRawProtobufWithCanonicalHeaders() {
-        KafkaTemplate<String, Object> kafkaTemplate = mock(KafkaTemplate.class);
+    void givenFrozenProtobufEvent_whenPublishing_thenAddsCanonicalHeaders() {
+        KafkaTemplate<String, Message> kafkaTemplate = mock(KafkaTemplate.class);
         KafkaEventProperties properties = new KafkaEventProperties();
         Clock clock = Clock.fixed(Instant.ofEpochMilli(1_700_000_000_123L), ZoneOffset.UTC);
         EventPublisherImpl publisher = new EventPublisherImpl(kafkaTemplate, "gym-service", properties, clock);
         when(kafkaTemplate.send(any(ProducerRecord.class))).thenReturn(successfulSend());
 
-        publisher.publish("test-topic", "key-1", Empty.getDefaultInstance(), "event-1", Map.of("x-custom", "val"));
+        publisher.publish(TOPIC, "key-1", EVENT, "event-1", Map.of("x-custom", "val"));
 
-        ProducerRecord<String, Object> record = capturedRecord(kafkaTemplate);
-        assertSame(Empty.getDefaultInstance(), record.value());
-        assertEquals("google.protobuf.Empty", header(record, EventPublisherImpl.HEADER_EVENT_TYPE));
+        ProducerRecord<String, Message> record = capturedRecord(kafkaTemplate);
+        assertSame(EVENT, record.value());
+        assertEquals("events.v1.UserRegisteredEvent", header(record, EventPublisherImpl.HEADER_EVENT_TYPE));
         assertEquals("gym-service", header(record, EventPublisherImpl.HEADER_SOURCE));
         assertEquals("1700000000123", header(record, EventPublisherImpl.HEADER_TIMESTAMP));
         assertEquals("event-1", header(record, EventPublisherImpl.HEADER_EVENT_ID));
+        assertNotNull(record.headers().lastHeader(EventPublisherImpl.HEADER_TRACEPARENT));
         assertEquals("val", header(record, "x-custom"));
-        assertEquals(null, record.headers().lastHeader("x-event-type"));
     }
 
     @Test
-    void testEventPublisherInjectsW3CTraceContext() {
-        KafkaTemplate<String, Object> kafkaTemplate = mock(KafkaTemplate.class);
+    void givenValidW3CContext_whenPublishing_thenPropagatesW3CHeaders() {
+        KafkaTemplate<String, Message> kafkaTemplate = mock(KafkaTemplate.class);
         EventPublisherImpl publisher = new EventPublisherImpl(kafkaTemplate, "gym-service", new KafkaEventProperties());
         when(kafkaTemplate.send(any(ProducerRecord.class))).thenReturn(successfulSend());
 
@@ -71,16 +71,10 @@ class KafkaAndPublisherTest {
                 TraceState.builder().put("vendor", "value").build()
         );
         try (Scope ignored = Span.wrap(spanContext).storeInContext(Context.current()).makeCurrent()) {
-            publisher.publish(
-                    "test-topic",
-                    "key-1",
-                    Empty.getDefaultInstance(),
-                    "event-1",
-                    Map.of()
-            );
+            publisher.publish(TOPIC, "key-1", EVENT, "event-1", Map.of());
         }
 
-        ProducerRecord<String, Object> record = capturedRecord(kafkaTemplate);
+        ProducerRecord<String, Message> record = capturedRecord(kafkaTemplate);
         assertEquals("00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01",
                 header(record, EventPublisherImpl.HEADER_TRACEPARENT));
         assertEquals("vendor=value", header(record, EventPublisherImpl.HEADER_TRACESTATE));
@@ -88,91 +82,71 @@ class KafkaAndPublisherTest {
     }
 
     @Test
-    void testEventPublisherUsesTraceIdOnlyWithoutW3CContext() {
-        KafkaTemplate<String, Object> kafkaTemplate = mock(KafkaTemplate.class);
+    void givenCorrelationFallback_whenPublishing_thenRetainsItWithoutReplacingW3CHeader() {
+        KafkaTemplate<String, Message> kafkaTemplate = mock(KafkaTemplate.class);
         EventPublisherImpl publisher = new EventPublisherImpl(kafkaTemplate, "gym-service", new KafkaEventProperties());
         when(kafkaTemplate.send(any(ProducerRecord.class))).thenReturn(successfulSend());
 
-        publisher.publish(
-                "test-topic",
-                "key-1",
-                Empty.getDefaultInstance(),
-                "event-1",
-                Map.of(EventPublisherImpl.HEADER_TRACE_ID, "legacy-trace")
-        );
+        publisher.publish(TOPIC, "key-1", EVENT, "event-1", Map.of(EventPublisherImpl.HEADER_TRACE_ID, "legacy-trace"));
 
-        ProducerRecord<String, Object> record = capturedRecord(kafkaTemplate);
+        ProducerRecord<String, Message> record = capturedRecord(kafkaTemplate);
         assertEquals("legacy-trace", header(record, EventPublisherImpl.HEADER_TRACE_ID));
-        assertEquals(null, record.headers().lastHeader(EventPublisherImpl.HEADER_TRACEPARENT));
+        assertNotNull(record.headers().lastHeader(EventPublisherImpl.HEADER_TRACEPARENT));
     }
 
     @Test
-    void testEventPublisherRejectsCanonicalHeaderOverride() {
-        KafkaTemplate<String, Object> kafkaTemplate = mock(KafkaTemplate.class);
+    void givenReservedHeadersOrUnknownPair_whenPublishing_thenRejectsRequest() {
+        KafkaTemplate<String, Message> kafkaTemplate = mock(KafkaTemplate.class);
         EventPublisherImpl publisher = new EventPublisherImpl(kafkaTemplate, "gym-service", new KafkaEventProperties());
 
         assertThrows(IllegalArgumentException.class, () -> publisher.publish(
-                "test-topic", "key-1", Empty.getDefaultInstance(), "event-1",
-                Map.of(EventPublisherImpl.HEADER_SOURCE, "spoofed")
+                TOPIC, "key-1", EVENT, "event-1", Map.of(EventPublisherImpl.HEADER_SOURCE, "spoofed")
+        ));
+        assertThrows(IllegalArgumentException.class, () -> publisher.publish(
+                "test-topic", "key-1", EVENT, "event-1", Map.of()
         ));
     }
 
     @Test
-    void testEventPublisherValidatesRequiredValues() {
-        KafkaTemplate<String, Object> kafkaTemplate = mock(KafkaTemplate.class);
+    void givenInvalidValuesOrRegistrationEnabled_whenPublishing_thenRejectsRequest() {
+        KafkaTemplate<String, Message> kafkaTemplate = mock(KafkaTemplate.class);
         EventPublisherImpl publisher = new EventPublisherImpl(kafkaTemplate, "gym-service", new KafkaEventProperties());
 
-        assertThrows(NullPointerException.class, () -> publisher.publish(null, "key", Empty.getDefaultInstance()));
-        assertThrows(NullPointerException.class, () -> publisher.publish("topic", "key", null));
-        assertThrows(IllegalArgumentException.class,
-                () -> publisher.publish(" ", "key", Empty.getDefaultInstance()));
-        assertThrows(IllegalArgumentException.class,
-                () -> publisher.publish("topic", "key", Empty.getDefaultInstance(), " ", Map.of()));
+        assertThrows(NullPointerException.class, () -> publisher.publish(null, "key", EVENT));
+        assertThrows(NullPointerException.class, () -> publisher.publish(TOPIC, "key", null));
+        assertThrows(IllegalArgumentException.class, () -> publisher.publish(" ", "key", EVENT));
+        assertThrows(IllegalArgumentException.class, () -> publisher.publish(TOPIC, "key", EVENT, " ", Map.of()));
+
+        KafkaEventProperties autoRegistration = new KafkaEventProperties();
+        autoRegistration.setAutoRegisterSchemas(true);
+        EventPublisherImpl blocked = new EventPublisherImpl(kafkaTemplate, "gym-service", autoRegistration);
+        assertThrows(IllegalStateException.class, () -> blocked.publish(TOPIC, "key", EVENT));
     }
 
     @Test
-    void testRetryableConsumer() {
-        RetryableConsumer<Empty> consumer = new RetryableConsumer<>() {
-            @Override
-            public void onMessage(EventEnvelope<Empty> envelope) {
-                if ("error".equals(envelope.key())) {
-                    throw new IllegalArgumentException("Test processing error");
-                }
-            }
-        };
-
-        EventEnvelope<Empty> validEnvelope = new EventEnvelope<>("EmptyEvent", "valid", Empty.getDefaultInstance(), 0L, "t", "s");
-        assertDoesNotThrow(() -> consumer.onMessage(validEnvelope));
-
-        EventEnvelope<Empty> errorEnvelope = new EventEnvelope<>("EmptyEvent", "error", Empty.getDefaultInstance(), 0L, "t", "s");
-        assertThrows(IllegalArgumentException.class, () -> consumer.onMessage(errorEnvelope));
-    }
-
-    @Test
-    void testEventPublisherImplPublishFailure() {
-        KafkaTemplate<String, Object> kafkaTemplate = mock(KafkaTemplate.class);
+    void givenBrokerAcknowledgementFailure_whenPublishing_thenRaisesPublishFailure() {
+        KafkaTemplate<String, Message> kafkaTemplate = mock(KafkaTemplate.class);
         EventPublisherImpl publisher = new EventPublisherImpl(kafkaTemplate, "gym-service", new KafkaEventProperties());
-        CompletableFuture<SendResult<String, Object>> failedFuture = new CompletableFuture<>();
+        CompletableFuture<SendResult<String, Message>> failedFuture = new CompletableFuture<>();
         failedFuture.completeExceptionally(new RuntimeException("Kafka unreachable"));
         when(kafkaTemplate.send(any(ProducerRecord.class))).thenReturn(failedFuture);
 
-        assertThrows(EventPublishFailedException.class,
-                () -> publisher.publish("test-topic", "key-1", Empty.getDefaultInstance()));
+        assertThrows(EventPublishFailedException.class, () -> publisher.publish(TOPIC, "key-1", EVENT));
     }
 
-    private static CompletableFuture<SendResult<String, Object>> successfulSend() {
-        RecordMetadata metadata = new RecordMetadata(new TopicPartition("test-topic", 0), 0, 0, 0, 0, 0);
+    private static CompletableFuture<SendResult<String, Message>> successfulSend() {
+        RecordMetadata metadata = new RecordMetadata(new TopicPartition(TOPIC, 0), 0, 0, 0, 0, 0);
         return CompletableFuture.completedFuture(new SendResult<>(null, metadata));
     }
 
     @SuppressWarnings("unchecked")
-    private static ProducerRecord<String, Object> capturedRecord(KafkaTemplate<String, Object> kafkaTemplate) {
+    private static ProducerRecord<String, Message> capturedRecord(KafkaTemplate<String, Message> kafkaTemplate) {
         var captor = org.mockito.ArgumentCaptor.forClass(ProducerRecord.class);
         verify(kafkaTemplate).send(captor.capture());
         return captor.getValue();
     }
 
-    private static String header(ProducerRecord<String, Object> record, String key) {
+    private static String header(ProducerRecord<String, Message> record, String key) {
         assertNotNull(record.headers().lastHeader(key), "missing header: " + key);
         return new String(record.headers().lastHeader(key).value(), StandardCharsets.UTF_8);
     }
