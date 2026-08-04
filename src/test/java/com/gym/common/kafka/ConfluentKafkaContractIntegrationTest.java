@@ -199,6 +199,7 @@ class ConfluentKafkaContractIntegrationTest {
             try (Consumer<byte[], byte[]> consumer = newRawConsumer("go-to-java")) {
                 consumer.subscribe(List.of(fixture.topic()));
                 pollUntilAssigned(consumer);
+                consumer.seekToBeginning(consumer.assignment());
                 RawKafkaRecord raw = RawKafkaRecord.from(pollForKey(consumer, key.getBytes(StandardCharsets.UTF_8)));
                 var decoded = decoder.decode(raw);
 
