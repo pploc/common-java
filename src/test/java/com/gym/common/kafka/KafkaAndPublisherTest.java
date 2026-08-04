@@ -20,6 +20,7 @@ import org.springframework.kafka.support.SendResult;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.Map;
@@ -125,13 +126,45 @@ class KafkaAndPublisherTest {
 
     @Test
     void givenBrokerAcknowledgementFailure_whenPublishing_thenRaisesPublishFailure() {
+        // Given
         KafkaTemplate<String, Message> kafkaTemplate = mock(KafkaTemplate.class);
         EventPublisherImpl publisher = new EventPublisherImpl(kafkaTemplate, "gym-service", new KafkaEventProperties());
         CompletableFuture<SendResult<String, Message>> failedFuture = new CompletableFuture<>();
         failedFuture.completeExceptionally(new RuntimeException("Kafka unreachable"));
         when(kafkaTemplate.send(any(ProducerRecord.class))).thenReturn(failedFuture);
 
+        // When / Then
         assertThrows(EventPublishFailedException.class, () -> publisher.publish(TOPIC, "key-1", EVENT));
+    }
+
+    @Test
+    void givenAcknowledgementTimeout_whenPublishing_thenRaisesPublishFailure() {
+        // Given
+        KafkaTemplate<String, Message> kafkaTemplate = mock(KafkaTemplate.class);
+        KafkaEventProperties properties = new KafkaEventProperties();
+        properties.setPublishTimeout(Duration.ofMillis(1));
+        EventPublisherImpl publisher = new EventPublisherImpl(kafkaTemplate, "gym-service", properties);
+        when(kafkaTemplate.send(any(ProducerRecord.class))).thenReturn(new CompletableFuture<>());
+
+        // When / Then
+        assertThrows(EventPublishFailedException.class, () -> publisher.publish(TOPIC, "key-1", EVENT));
+    }
+
+    @Test
+    void givenInterruptedWait_whenPublishing_thenRestoresInterruptAndRaisesPublishFailure() {
+        // Given
+        KafkaTemplate<String, Message> kafkaTemplate = mock(KafkaTemplate.class);
+        EventPublisherImpl publisher = new EventPublisherImpl(kafkaTemplate, "gym-service", new KafkaEventProperties());
+        when(kafkaTemplate.send(any(ProducerRecord.class))).thenReturn(new CompletableFuture<>());
+        Thread.currentThread().interrupt();
+
+        try {
+            // When / Then
+            assertThrows(EventPublishFailedException.class, () -> publisher.publish(TOPIC, "key-1", EVENT));
+            assertEquals(true, Thread.currentThread().isInterrupted());
+        } finally {
+            Thread.interrupted();
+        }
     }
 
     private static CompletableFuture<SendResult<String, Message>> successfulSend() {

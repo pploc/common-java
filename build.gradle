@@ -169,9 +169,34 @@ tasks.register('kafkaContractIntegration', Test) {
     outputs.upToDateWhen { false }
     useJUnitPlatform {
         includeTags('kafka-contract')
+        excludeTags('foundation-matrix')
     }
     reports.junitXml.outputLocation = layout.buildDirectory.dir('test-results/kafkaContractIntegration')
     reports.html.outputLocation = layout.buildDirectory.dir('reports/tests/kafkaContractIntegration')
+}
+
+tasks.register('foundationMatrixProduce', Test) {
+    description = 'Publishes Java records for the cross-language foundation matrix.'
+    group = 'verification'
+    testClassesDirs = sourceSets.test.output.classesDirs
+    classpath = sourceSets.test.runtimeClasspath
+    outputs.upToDateWhen { false }
+    useJUnitPlatform {
+        includeTags('foundation-matrix-produce')
+    }
+    reports.junitXml.outputLocation = layout.buildDirectory.dir('test-results/foundationMatrixProduce')
+}
+
+tasks.register('foundationMatrixConsume', Test) {
+    description = 'Consumes Go records for the cross-language foundation matrix.'
+    group = 'verification'
+    testClassesDirs = sourceSets.test.output.classesDirs
+    classpath = sourceSets.test.runtimeClasspath
+    outputs.upToDateWhen { false }
+    useJUnitPlatform {
+        includeTags('foundation-matrix-consume')
+    }
+    reports.junitXml.outputLocation = layout.buildDirectory.dir('test-results/foundationMatrixConsume')
 }
 
 jacocoTestReport {

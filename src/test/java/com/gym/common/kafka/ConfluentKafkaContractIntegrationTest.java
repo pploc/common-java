@@ -16,6 +16,7 @@ import io.opentelemetry.api.trace.Span;
 import io.opentelemetry.api.trace.SpanContext;
 import io.opentelemetry.api.trace.TraceFlags;
 import io.opentelemetry.api.trace.TraceState;
+import io.opentelemetry.api.trace.TraceStateBuilder;
 import io.opentelemetry.context.Context;
 import io.opentelemetry.context.Scope;
 import org.apache.kafka.clients.consumer.Consumer;
@@ -156,6 +157,58 @@ class ConfluentKafkaContractIntegrationTest {
                 assertEquals(fixture.eventType(), decoded.message().getDescriptorForType().getFullName());
                 assertCanonicalHeaders(fixture.headers(), raw.headers());
                 assertFalse(raw.headers().stream().anyMatch(header -> header.key().startsWith("x-event-")));
+            }
+        }
+    }
+
+    @Test
+    @Tag("foundation-matrix")
+    @Tag("foundation-matrix-produce")
+    void givenMatrixRun_whenJavaPublishes_thenWritesEveryFixtureForGo() {
+        // Given
+        String matrixRunId = matrixRunId();
+        KafkaEventProperties properties = properties();
+        KafkaTemplate<String, Message> template = kafkaConfig.kafkaTemplate(protobufProducerFactory);
+
+        // When
+        for (FixtureCase fixture : fixtures.cases()) {
+            Message message = decoder.decode(fixture.rawRecord()).message();
+            EventPublisherImpl publisher = new EventPublisherImpl(
+                    template,
+                    fixture.headers().get(KafkaContract.HEADER_SOURCE),
+                    properties,
+                    Clock.fixed(Instant.ofEpochMilli(Long.parseLong(fixture.headers().get(KafkaContract.HEADER_TIMESTAMP))), ZoneOffset.UTC)
+            );
+            publishWithFixtureTrace(fixture, publisher, matrixKey(fixture, matrixRunId, "java-to-go"), message);
+        }
+
+        // Then
+        assertEquals(KafkaContract.TOPIC_TYPES.size(), fixtures.cases().size());
+    }
+
+    @Test
+    @Tag("foundation-matrix")
+    @Tag("foundation-matrix-consume")
+    void givenGoPublishedMatrix_whenJavaConsumes_thenVerifiesEveryFixture() {
+        // Given
+        String matrixRunId = matrixRunId();
+
+        // When / Then
+        for (FixtureCase fixture : fixtures.cases()) {
+            String key = matrixKey(fixture, matrixRunId, "go-to-java");
+            try (Consumer<byte[], byte[]> consumer = newRawConsumer("go-to-java")) {
+                consumer.subscribe(List.of(fixture.topic()));
+                pollUntilAssigned(consumer);
+                RawKafkaRecord raw = RawKafkaRecord.from(pollForKey(consumer, key.getBytes(StandardCharsets.UTF_8)));
+                var decoded = decoder.decode(raw);
+
+                assertEquals(fixture.topic(), raw.topic());
+                assertArrayEquals(key.getBytes(StandardCharsets.UTF_8), raw.key());
+                assertArrayEquals(fixture.completeFrameBytes(), raw.value());
+                assertArrayEquals(fixture.payload(), decoded.message().toByteArray());
+                assertEquals(fixture.eventType(), decoded.message().getDescriptorForType().getFullName());
+                assertEquals(fixture.subject(), KafkaContract.subjectFor(raw.topic()));
+                assertMatrixHeaders(fixture, raw.headers());
             }
         }
     }
@@ -336,7 +389,15 @@ class ConfluentKafkaContractIntegrationTest {
 
     private void publishWithFixtureTrace(FixtureCase fixture, EventPublisherImpl fixturePublisher, String key, Message message) {
         String[] parts = fixture.headers().get(KafkaContract.HEADER_TRACEPARENT).split("-");
-        SpanContext spanContext = SpanContext.create(parts[1], parts[2], TraceFlags.getSampled(), TraceState.getDefault());
+        TraceStateBuilder traceState = TraceState.builder();
+        String fixtureTraceState = fixture.headers().get(KafkaContract.HEADER_TRACESTATE);
+        if (fixtureTraceState != null) {
+            for (String member : fixtureTraceState.split(",")) {
+                String[] pair = member.split("=", 2);
+                traceState.put(pair[0], pair[1]);
+            }
+        }
+        SpanContext spanContext = SpanContext.create(parts[1], parts[2], TraceFlags.getSampled(), traceState.build());
         try (Scope ignored = Span.wrap(spanContext).storeInContext(Context.current()).makeCurrent()) {
             fixturePublisher.publish(fixture.topic(), key, message, fixture.headers().get(KafkaContract.HEADER_EVENT_ID), Map.of());
         }
@@ -401,6 +462,25 @@ class ConfluentKafkaContractIntegrationTest {
         }
     }
 
+    private static void assertMatrixHeaders(FixtureCase fixture, List<RawKafkaHeader> headers) {
+        List<String> names = new ArrayList<>(List.of(
+                KafkaContract.HEADER_EVENT_TYPE,
+                KafkaContract.HEADER_SOURCE,
+                KafkaContract.HEADER_TIMESTAMP,
+                KafkaContract.HEADER_EVENT_ID,
+                KafkaContract.HEADER_TRACEPARENT
+        ));
+        if (fixture.headers().containsKey(KafkaContract.HEADER_TRACESTATE)) {
+            names.add(KafkaContract.HEADER_TRACESTATE);
+        }
+        assertEquals(names.size(), headers.size());
+        for (int index = 0; index < names.size(); index++) {
+            String name = names.get(index);
+            assertEquals(name, headers.get(index).key());
+            assertArrayEquals(fixture.headers().get(name).getBytes(StandardCharsets.UTF_8), headers.get(index).value());
+        }
+    }
+
     private static void assertDlqHeaders(List<RawKafkaHeader> original, org.apache.kafka.common.header.Headers headers, String topic) {
         List<Header> actual = new ArrayList<>();
         headers.forEach(actual::add);
@@ -442,10 +522,18 @@ class ConfluentKafkaContractIntegrationTest {
         }
     }
 
+    private static String matrixRunId() {
+        return requiredEnvironment("FOUNDATION_MATRIX_RUN_ID");
+    }
+
+    private static String matrixKey(FixtureCase fixture, String runId, String direction) {
+        return runId + "-" + direction + "-" + fixture.name();
+    }
+
     private static String requiredEnvironment(String name) {
         String value = System.getenv(name);
         if (value == null || value.isBlank()) {
-            throw new IllegalStateException("Kafka contract tests require KAFKA_BROKERS, SCHEMA_REGISTRY_URL, and GYM_PROTO_FIXTURE_PATH");
+            throw new IllegalStateException("Missing required contract environment variable: " + name);
         }
         return value.trim();
     }
@@ -468,7 +556,7 @@ class ConfluentKafkaContractIntegrationTest {
     }
 
     @JsonIgnoreProperties(ignoreUnknown = true)
-    record FixtureCase(String topic, String keyUtf8, String subject, String eventType, Map<String, String> headers,
+    record FixtureCase(String name, String topic, String keyUtf8, String subject, String eventType, Map<String, String> headers,
                        String payloadHex, Frame frame) {
         RawKafkaRecord rawRecord() {
             return new RawKafkaRecord(topic, 0, 0L, keyUtf8.getBytes(StandardCharsets.UTF_8), completeFrameBytes(), headerList());

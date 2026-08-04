@@ -5,11 +5,41 @@ on:
     branches: [develop]
   push:
     branches: [develop]
-    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      candidate_ref:
+        description: Immutable common-java candidate tag
+        required: true
+        default: candidate/v2.0.0-rc.1
+      candidate_sha:
+        description: Matrix-tested common-java commit SHA
+        required: true
+      common_go_ref:
+        description: Immutable common-go candidate tag
+        required: true
+        default: candidate/v0.3.0-rc.1
+      common_go_sha:
+        description: Matrix-tested common-go commit SHA
+        required: true
+      common_go_version:
+        description: Matrix-tested common-go RC version
+        required: true
+        default: v0.3.0-rc.1
+      release_version:
+        description: Maven RC version
+        required: true
+        default: 2.0.0-rc.1
+      matrix_run_id:
+        description: Successful common-go Foundation RC Matrix run ID
+        required: true
 
 permissions:
   contents: read
   packages: read
+
+concurrency:
+  group: common-java-release-${{ inputs.release_version || github.ref }}
+  cancel-in-progress: false
 
 env:
   GITHUB_ACTOR: ${{ github.actor }}
@@ -23,8 +53,8 @@ jobs:
           fetch-depth: 0
       - uses: actions/setup-java@v4
         with:
-          java-version: '26'
-          distribution: 'corretto'
+          java-version: "26"
+          distribution: "corretto"
       - name: Validate Java foundation
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -37,42 +67,152 @@ jobs:
 
   publish:
     needs: [validate, kafka-contract-integration]
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     environment: release
     permissions:
-      contents: read
+      actions: read
+      contents: write
       packages: write
     steps:
+      - name: Validate immutable release inputs
+        shell: bash
+        env:
+          CANDIDATE_REF: ${{ inputs.candidate_ref }}
+          CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+          COMMON_GO_REF: ${{ inputs.common_go_ref }}
+          COMMON_GO_SHA: ${{ inputs.common_go_sha }}
+          COMMON_GO_VERSION: ${{ inputs.common_go_version }}
+          MATRIX_RUN_ID: ${{ inputs.matrix_run_id }}
+          RELEASE_VERSION: ${{ inputs.release_version }}
+        run: |
+          set -euo pipefail
+          [[ "$CANDIDATE_REF" =~ ^candidate/v2\.0\.0-rc\.[1-9][0-9]*$ ]]
+          [[ "$CANDIDATE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$COMMON_GO_REF" =~ ^candidate/v0\.3\.0-rc\.[1-9][0-9]*$ ]]
+          [[ "$COMMON_GO_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$COMMON_GO_VERSION" =~ ^v0\.3\.0-rc\.[1-9][0-9]*$ ]]
+          [[ "$MATRIX_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$RELEASE_VERSION" =~ ^2\.0\.0-rc\.[1-9][0-9]*$ ]]
+          test "$CANDIDATE_REF" = "candidate/v$RELEASE_VERSION"
+          test "$COMMON_GO_REF" = "candidate/$COMMON_GO_VERSION"
+
+      - name: Verify authoritative matrix evidence
+        shell: bash
+        env:
+          CANDIDATE_REF: ${{ inputs.candidate_ref }}
+          CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+          COMMON_GO_REF: ${{ inputs.common_go_ref }}
+          COMMON_GO_SHA: ${{ inputs.common_go_sha }}
+          COMMON_GO_VERSION: ${{ inputs.common_go_version }}
+          MATRIX_READ_TOKEN: ${{ secrets.MATRIX_READ_TOKEN }}
+          MATRIX_RUN_ID: ${{ inputs.matrix_run_id }}
+          RELEASE_VERSION: ${{ inputs.release_version }}
+        run: |
+          set -euo pipefail
+          test -n "$MATRIX_READ_TOKEN"
+          api=https://api.github.com/repos/pploc/common-go
+          run="$(curl --fail --silent --show-error "$api/actions/runs/$MATRIX_RUN_ID")"
+          jq -e --argjson id "$MATRIX_RUN_ID" '
+            .id == $id and .repository.full_name == "pploc/common-go"
+            and .head_repository.full_name == "pploc/common-go"
+            and .head_branch == "develop" and .event == "workflow_dispatch"
+            and .path == ".github/workflows/foundation-rc-matrix.yml"
+            and .status == "completed" and .conclusion == "success"
+          ' <<<"$run" >/dev/null
+          attempt="$(jq -r '.run_attempt' <<<"$run")"
+          workflow_sha="$(jq -r '.head_sha' <<<"$run")"
+          artifact_name="foundation-rc-matrix-$MATRIX_RUN_ID-$attempt"
+          artifacts="$(curl --fail --silent --show-error "$api/actions/runs/$MATRIX_RUN_ID/artifacts?per_page=100")"
+          artifact="$(jq -ce --arg name "$artifact_name" --arg sha "$workflow_sha" --argjson id "$MATRIX_RUN_ID" '
+            [.artifacts[] | select(.name == $name and .expired == false and .workflow_run.id == $id and .workflow_run.head_sha == $sha)] | if length == 1 then .[0] else error("expected one retained matrix artifact") end
+          ' <<<"$artifacts")"
+          artifact_id="$(jq -r '.id' <<<"$artifact")"
+          artifact_digest="$(jq -r '.digest | sub("^sha256:"; "")' <<<"$artifact")"
+          GH_TOKEN="$MATRIX_READ_TOKEN" gh api "repos/pploc/common-go/actions/artifacts/$artifact_id/zip" > matrix.zip
+          test "$(sha256sum matrix.zip | cut -d ' ' -f1)" = "$artifact_digest"
+          mkdir matrix
+          unzip -q matrix.zip -d matrix
+          jq -e \
+            --arg goRef "$COMMON_GO_REF" --arg goSha "$COMMON_GO_SHA" --arg goVersion "$COMMON_GO_VERSION" \
+            --arg javaRef "$CANDIDATE_REF" --arg javaSha "$CANDIDATE_SHA" --arg javaVersion "$RELEASE_VERSION" \
+            --argjson runId "$MATRIX_RUN_ID" --argjson attempt "$attempt" '
+              .workflowRunId == $runId and .workflowRunAttempt == $attempt
+              and .commonGoCandidateRef == $goRef and .commonGoSha == $goSha and .commonGo == $goVersion
+              and .commonJavaCandidateRef == $javaRef and .commonJavaSha == $javaSha and .commonJava == $javaVersion
+              and .status == "success" and .javaToGo == "pass" and .goToJava == "pass"
+              and .retryCommitDlq == "pass" and .registryMutation == "none"
+            ' matrix/cross-language-matrix.json >/dev/null
+
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          ref: ${{ github.ref }}
+          ref: ${{ inputs.candidate_ref }}
+
       - uses: actions/setup-java@v4
         with:
-          java-version: '26'
-          distribution: 'corretto'
-      - name: Validate tag-derived version
+          java-version: "26"
+          distribution: corretto
+
+      - name: Bind candidate and refuse release reuse
         shell: bash
+        env:
+          CANDIDATE_REF: ${{ inputs.candidate_ref }}
+          CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_VERSION: ${{ inputs.release_version }}
         run: |
           set -euo pipefail
-          version="${GITHUB_REF#refs/tags/v}"
-          test -n "$version"
-          test "$(git tag --points-at HEAD | grep -Fx "v$version")" = "v$version"
-          echo "RELEASE_VERSION=$version" >> "$GITHUB_ENV"
-      - name: Validate and publish immutable package
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          test "$(git rev-parse "$CANDIDATE_REF^{commit}")" = "$CANDIDATE_SHA"
+          release_tag="v$RELEASE_VERSION"
+          if git ls-remote --exit-code --tags origin "refs/tags/$release_tag" >/dev/null 2>&1; then
+            printf 'Release tag %s already exists\n' "$release_tag" >&2
+            exit 1
+          fi
+          package_url="https://maven.pkg.github.com/pploc/common-java/com/gym/common-java/$RELEASE_VERSION/common-java-$RELEASE_VERSION.pom"
+          package_status="$(curl --silent --show-error --location --output /dev/null --write-out '%{http_code}' \
+            --user "$GITHUB_ACTOR:$GITHUB_TOKEN" "$package_url")"
+          case "$package_status" in
+            404) ;;
+            200) printf 'Maven package %s already exists\n' "$RELEASE_VERSION" >&2; exit 1 ;;
+            *) printf 'Package version check returned HTTP %s\n' "$package_status" >&2; exit 1 ;;
+          esac
+          echo "RELEASE_VERSION=$RELEASE_VERSION" >> "$GITHUB_ENV"
+          echo "RELEASE_TAG=$release_tag" >> "$GITHUB_ENV"
+
+      - name: Build release artifacts
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: ./gradlew clean check jacocoTestCoverageVerification jar sourcesJar javadocJar generatePomFileForGprPublication --no-daemon
+
+      - name: Write pre-publication provenance
+        shell: bash
+        env:
+          MATRIX_RUN_ID: ${{ inputs.matrix_run_id }}
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          git rev-parse HEAD > evidence/source-sha.txt
+          printf '%s\n' "$MATRIX_RUN_ID" > evidence/matrix-run-id.txt
+          sha256sum build/libs/*.jar > evidence/artifacts.sha256
+          sha256sum build/publications/gpr/pom-default.xml > evidence/pom.sha256
+
+      - name: Create immutable RC tag and publish Maven package
+        shell: bash
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          ./gradlew clean check jacocoTestCoverageVerification --no-daemon
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git tag -a "$RELEASE_TAG" -m "common-java $RELEASE_VERSION"
+          git push origin "refs/tags/$RELEASE_TAG"
           ./gradlew publish --no-daemon
-      - name: Write provenance evidence
-        shell: bash
-        run: |
-          mkdir -p evidence
-          git rev-parse HEAD > evidence/source-sha.txt
-          sha256sum build/libs/*.jar > evidence/artifacts.sha256
+
       - uses: actions/upload-artifact@v4
         with:
-          name: common-java-release-evidence-${{ github.sha }}
+          name: common-java-release-evidence-${{ inputs.candidate_sha }}
           path: evidence/
+          if-no-files-found: error
+          retention-days: 90
