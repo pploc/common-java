@@ -176,9 +176,13 @@ jobs:
           test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
           test "$(git rev-parse "$CANDIDATE_REF^{commit}")" = "$CANDIDATE_SHA"
           release_tag="v$RELEASE_VERSION"
-          if git ls-remote --exit-code --tags origin "refs/tags/$release_tag" >/dev/null 2>&1; then
-            printf 'Release tag %s already exists\n' "$release_tag" >&2
-            exit 1
+          if [[ "$RELEASE_VERSION" == *-rc.* ]]; then
+            if git ls-remote --exit-code --tags origin "refs/tags/$release_tag" >/dev/null 2>&1; then
+              printf 'Release tag %s already exists\n' "$release_tag" >&2
+              exit 1
+            fi
+          else
+            test "$(git ls-remote origin "refs/tags/$release_tag^{}" | cut -f1)" = "$CANDIDATE_SHA"
           fi
           package_url="https://maven.pkg.github.com/pploc/common-java/com/gym/common-java/$RELEASE_VERSION/common-java-$RELEASE_VERSION.pom"
           package_status="$(curl --silent --show-error --location --output /dev/null --write-out '%{http_code}' \
@@ -208,7 +212,8 @@ jobs:
           sha256sum build/libs/*.jar > evidence/artifacts.sha256
           sha256sum build/publications/gpr/pom-default.xml > evidence/pom.sha256
 
-      - name: Create immutable tag and publish Maven package
+      - name: Create RC tag and publish Maven package
+        if: contains(inputs.release_version, '-rc.')
         shell: bash
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -219,6 +224,12 @@ jobs:
           git tag -a "$RELEASE_TAG" -m "common-java $RELEASE_VERSION"
           git push origin "refs/tags/$RELEASE_TAG"
           ./gradlew publish --no-daemon
+
+      - name: Publish stable Maven package
+        if: ${{ !contains(inputs.release_version, '-rc.') }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: ./gradlew publish --no-daemon
 
       - uses: actions/upload-artifact@v4
         with:
