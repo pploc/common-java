@@ -21,8 +21,10 @@ public class GrpcServerAutoConfig {
     private final GrpcProperties grpcProperties;
 
     @Bean
-    public AuthServerInterceptor authServerInterceptor(GrpcMethodRegistry registry) {
-        return new AuthServerInterceptor(registry);
+    @org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean
+    public AuthServerInterceptor authServerInterceptor(GrpcMethodRegistry registry, org.springframework.beans.factory.ObjectProvider<com.gym.common.grpc.security.WorkloadIdentityVerifier> verifierProvider) {
+        com.gym.common.grpc.security.WorkloadIdentityVerifier verifier = verifierProvider.getIfAvailable(() -> call -> false);
+        return new AuthServerInterceptor(registry, verifier);
     }
 
     @Bean
