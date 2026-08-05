@@ -14,6 +14,10 @@ on:
       candidate_sha:
         description: Matrix-tested common-java commit SHA
         required: true
+      candidate_version:
+        description: Matrix-tested common-java RC version
+        required: true
+        default: 2.0.0-rc.1
       common_go_ref:
         description: Immutable common-go candidate tag
         required: true
@@ -26,7 +30,7 @@ on:
         required: true
         default: v0.3.0-rc.1
       release_version:
-        description: Maven RC version
+        description: Maven release version
         required: true
         default: 2.0.0-rc.1
       matrix_run_id:
@@ -80,6 +84,7 @@ jobs:
         env:
           CANDIDATE_REF: ${{ inputs.candidate_ref }}
           CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+          CANDIDATE_VERSION: ${{ inputs.candidate_version }}
           COMMON_GO_REF: ${{ inputs.common_go_ref }}
           COMMON_GO_SHA: ${{ inputs.common_go_sha }}
           COMMON_GO_VERSION: ${{ inputs.common_go_version }}
@@ -89,12 +94,16 @@ jobs:
           set -euo pipefail
           [[ "$CANDIDATE_REF" =~ ^candidate/v2\.0\.0-rc\.[1-9][0-9]*$ ]]
           [[ "$CANDIDATE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$CANDIDATE_VERSION" =~ ^2\.0\.0-rc\.[1-9][0-9]*$ ]]
+          test "$CANDIDATE_REF" = "candidate/v$CANDIDATE_VERSION"
           [[ "$COMMON_GO_REF" =~ ^candidate/v0\.3\.0-rc\.[1-9][0-9]*$ ]]
           [[ "$COMMON_GO_SHA" =~ ^[0-9a-f]{40}$ ]]
           [[ "$COMMON_GO_VERSION" =~ ^v0\.3\.0-rc\.[1-9][0-9]*$ ]]
           [[ "$MATRIX_RUN_ID" =~ ^[1-9][0-9]*$ ]]
-          [[ "$RELEASE_VERSION" =~ ^2\.0\.0-rc\.[1-9][0-9]*$ ]]
-          test "$CANDIDATE_REF" = "candidate/v$RELEASE_VERSION"
+          [[ "$RELEASE_VERSION" =~ ^2\.0\.0(-rc\.[1-9][0-9]*)?$ ]]
+          if [[ "$RELEASE_VERSION" == *-rc.* ]]; then
+            test "$CANDIDATE_REF" = "candidate/v$RELEASE_VERSION"
+          fi
           test "$COMMON_GO_REF" = "candidate/$COMMON_GO_VERSION"
 
       - name: Verify authoritative matrix evidence
@@ -102,6 +111,7 @@ jobs:
         env:
           CANDIDATE_REF: ${{ inputs.candidate_ref }}
           CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+          CANDIDATE_VERSION: ${{ inputs.candidate_version }}
           COMMON_GO_REF: ${{ inputs.common_go_ref }}
           COMMON_GO_SHA: ${{ inputs.common_go_sha }}
           COMMON_GO_VERSION: ${{ inputs.common_go_version }}
@@ -135,7 +145,7 @@ jobs:
           unzip -q matrix.zip -d matrix
           jq -e \
             --arg goRef "$COMMON_GO_REF" --arg goSha "$COMMON_GO_SHA" --arg goVersion "$COMMON_GO_VERSION" \
-            --arg javaRef "$CANDIDATE_REF" --arg javaSha "$CANDIDATE_SHA" --arg javaVersion "$RELEASE_VERSION" \
+            --arg javaRef "$CANDIDATE_REF" --arg javaSha "$CANDIDATE_SHA" --arg javaVersion "$CANDIDATE_VERSION" \
             --argjson runId "$MATRIX_RUN_ID" --argjson attempt "$attempt" '
               .workflowRunId == $runId and .workflowRunAttempt == $attempt
               and .commonGoCandidateRef == $goRef and .commonGoSha == $goSha and .commonGo == $goVersion
@@ -198,7 +208,7 @@ jobs:
           sha256sum build/libs/*.jar > evidence/artifacts.sha256
           sha256sum build/publications/gpr/pom-default.xml > evidence/pom.sha256
 
-      - name: Create immutable RC tag and publish Maven package
+      - name: Create immutable tag and publish Maven package
         shell: bash
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
