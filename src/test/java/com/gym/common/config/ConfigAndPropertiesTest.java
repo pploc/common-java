@@ -4,6 +4,7 @@ import com.google.protobuf.Message;
 import com.gym.common.grpc.config.GrpcProperties;
 import com.gym.common.grpc.config.GrpcServerAutoConfig;
 import com.gym.common.grpc.interceptor.GrpcMethodRegistry;
+import com.gym.common.grpc.security.WorkloadIdentityVerifier;
 import com.gym.common.kafka.config.KafkaAutoConfig;
 import com.gym.common.kafka.config.KafkaEventProperties;
 import io.confluent.kafka.serializers.protobuf.KafkaProtobufSerializer;
@@ -12,18 +13,22 @@ import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.common.serialization.ByteArrayDeserializer;
 import org.apache.kafka.common.serialization.ByteArraySerializer;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.kafka.core.DefaultKafkaConsumerFactory;
 import org.springframework.kafka.core.DefaultKafkaProducerFactory;
 import org.springframework.kafka.core.KafkaTemplate;
 
 import java.time.Duration;
 import java.util.Map;
+import java.util.function.Supplier;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 class ConfigAndPropertiesTest {
     @Test
@@ -62,11 +67,23 @@ class ConfigAndPropertiesTest {
         GrpcProperties properties = new GrpcProperties();
         GrpcServerAutoConfig config = new GrpcServerAutoConfig(properties);
         GrpcMethodRegistry registry = mock(GrpcMethodRegistry.class);
+        @SuppressWarnings("unchecked")
+        ObjectProvider<WorkloadIdentityVerifier> verifierProvider = mock(ObjectProvider.class);
+        when(verifierProvider.getIfAvailable(any(Supplier.class))).thenReturn(call -> false);
 
-        assertNotNull(config.authServerInterceptor(registry));
+        assertNotNull(config.authServerInterceptor(registry, verifierProvider));
         assertNotNull(config.exceptionInterceptor());
         assertNotNull(config.loggingInterceptor());
         assertNotNull(config.tracingInterceptor());
+    }
+
+    @Test
+    void givenServletWeb_whenProtobufJsonWebConfig_thenRegistersConverterConfigurer() {
+        // Given
+        ProtobufJsonWebConfig config = new ProtobufJsonWebConfig();
+
+        // When / Then
+        assertNotNull(config.protobufJsonWebMvcConfigurer());
     }
 
     @Test
