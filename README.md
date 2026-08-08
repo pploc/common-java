@@ -4,7 +4,7 @@ Shared Java foundations for Gym microservices, built with Java 26 and Spring Boo
 
 ## Status
 
-`develop` is the unreleased G2 source line (`2.0.0-SNAPSHOT`). It is not a published package release. Legal Maven metadata is intentionally deferred pending repository-owner input.
+Published stable line is `com.gym:common-java:2.0.1` (tag `v2.0.1`). `develop` continues as `2.0.0-SNAPSHOT` for unreleased work; consume only published immutable versions in services.
 
 ## Kafka transport
 
@@ -16,17 +16,21 @@ Shared Java foundations for Gym microservices, built with Java 26 and Spring Boo
 
 Services retain transactional-outbox and idempotent-handler responsibilities; this library provides at-least-once transport only.
 
+## HTTP protobuf JSON
+
+Servlet web apps that depend on Spring MVC get `ProtobufJsonHttpMessageConverter` via auto-config (`ProtobufJsonWebConfig`). Controllers may use generated protobuf messages as `@RequestBody` / return types with snake_case proto field names (`preservingProtoFieldNames`). Plans (and Member later) share this binder; service DTO type packages stay out of common-java.
+
 ## Dependency setup
 
-Use only a published, immutable version after the G2/G3 release gates pass:
+Use only a published, immutable version:
 
 ```groovy
 dependencies {
-    implementation 'com.gym:common-java:<released-version>'
+    implementation 'com.gym:common-java:2.0.1'
 }
 ```
 
-The package is hosted at `https://maven.pkg.github.com/pploc/common-java`. Development and release verification resolve `com.gym.proto:gym-proto-java:1.1.0` without `mavenLocal()`.
+The package is hosted at `https://maven.pkg.github.com/pploc/common-java`. Development and release verification resolve dependencies without `mavenLocal()`.
 
 ## Verification
 
