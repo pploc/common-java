@@ -18,15 +18,15 @@ import java.lang.reflect.Method;
 import java.nio.charset.StandardCharsets;
 
 /**
- * Binds generated protobuf messages as snake_case JSON for Spring MVC.
- * Field names preserve proto names ({@code chain_id}, {@code price_vnd}, …) so HTTP
- * matches the frozen service contracts used by Plans, Member, and future Java edges.
+ * Binds generated protobuf messages as camelCase JSON for Spring MVC.
+ * Uses the protobuf JSON mapping default ({@code chainId}, {@code priceVnd}, …) so
+ * public HTTP matches typical browser/FE conventions while still using generated messages.
  */
 public class ProtobufJsonHttpMessageConverter extends AbstractHttpMessageConverter<Message> {
 
     private static final JsonFormat.Parser PARSER = JsonFormat.parser().ignoringUnknownFields();
     private static final JsonFormat.Printer PRINTER =
-            JsonFormat.printer().preservingProtoFieldNames().omittingInsignificantWhitespace();
+            JsonFormat.printer().omittingInsignificantWhitespace();
 
     public ProtobufJsonHttpMessageConverter() {
         super(MediaType.APPLICATION_JSON, new MediaType("application", "*+json"));

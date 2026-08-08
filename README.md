@@ -4,7 +4,7 @@ Shared Java foundations for Gym microservices, built with Java 26 and Spring Boo
 
 ## Status
 
-Published stable line is `com.gym:common-java:2.0.1` (tag `v2.0.1`). `develop` continues as `2.0.0-SNAPSHOT` for unreleased work; consume only published immutable versions in services.
+Published stable line is `com.gym:common-java:2.0.2` (tag `v2.0.2`). `develop` continues as `2.0.0-SNAPSHOT` for unreleased work; consume only published immutable versions in services.
 
 ## Kafka transport
 
@@ -18,7 +18,7 @@ Services retain transactional-outbox and idempotent-handler responsibilities; th
 
 ## HTTP protobuf JSON
 
-Servlet web apps that depend on Spring MVC get `ProtobufJsonHttpMessageConverter` via auto-config (`ProtobufJsonWebConfig`). Controllers may use generated protobuf messages as `@RequestBody` / return types with snake_case proto field names (`preservingProtoFieldNames`). Plans (and Member later) share this binder; service DTO type packages stay out of common-java.
+Servlet web apps that depend on Spring MVC get `ProtobufJsonHttpMessageConverter` via auto-config (`ProtobufJsonWebConfig`). Controllers may use generated protobuf messages as `@RequestBody` / return types with camelCase protobuf JSON names (`chainId`, `priceVnd`). Plans (and Member later) share this binder; service DTO type packages stay out of common-java.
 
 ## Dependency setup
 
@@ -26,7 +26,7 @@ Use only a published, immutable version:
 
 ```groovy
 dependencies {
-    implementation 'com.gym:common-java:2.0.1'
+    implementation 'com.gym:common-java:2.0.2'
 }
 ```
 
