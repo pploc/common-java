@@ -3,7 +3,15 @@ package com.gym.common.grpc.interceptor;
 import com.gym.common.error.DomainException;
 import com.gym.common.error.ErrorCategory;
 import com.gym.common.error.ErrorCode;
-import io.grpc.*;
+import io.grpc.ForwardingServerCall;
+import io.grpc.ForwardingServerCallListener;
+import io.grpc.Metadata;
+import io.grpc.ServerCall;
+import io.grpc.ServerCallHandler;
+import io.grpc.ServerInterceptor;
+import io.grpc.Status;
+import io.grpc.StatusException;
+import io.grpc.StatusRuntimeException;
 import lombok.extern.slf4j.Slf4j;
 
 /** Maps all gRPC failures through the frozen status and redaction contract. */
@@ -16,14 +24,20 @@ public class ExceptionInterceptor implements ServerInterceptor {
     @Override
     public <ReqT, RespT> ServerCall.Listener<ReqT> interceptCall(
             ServerCall<ReqT, RespT> call, Metadata headers, ServerCallHandler<ReqT, RespT> next) {
+        ServerCall<ReqT, RespT> guarded = new ForwardingServerCall.SimpleForwardingServerCall<>(call) {
+            @Override
+            public void close(Status status, Metadata trailers) {
+                super.close(normalizeStatus(status), ensureTrailers(status, trailers));
+            }
+        };
         try {
-            return new ForwardingServerCallListener.SimpleForwardingServerCallListener<>(next.startCall(call, headers)) {
+            return new ForwardingServerCallListener.SimpleForwardingServerCallListener<>(next.startCall(guarded, headers)) {
                 @Override
                 public void onHalfClose() {
                     try {
                         super.onHalfClose();
                     } catch (Throwable throwable) {
-                        handleException(throwable, call);
+                        handleException(throwable, guarded);
                     }
                 }
 
@@ -32,23 +46,32 @@ public class ExceptionInterceptor implements ServerInterceptor {
                     try {
                         super.onMessage(message);
                     } catch (Throwable throwable) {
-                        handleException(throwable, call);
+                        handleException(throwable, guarded);
                     }
                 }
             };
         } catch (Throwable throwable) {
-            handleException(throwable, call);
+            handleException(throwable, guarded);
             return new ServerCall.Listener<>() {};
         }
     }
 
     private <ReqT, RespT> void handleException(Throwable throwable, ServerCall<ReqT, RespT> call) {
+        Status status;
         Metadata trailers = new Metadata();
-        Status status = Status.INTERNAL.withDescription(INTERNAL_DESCRIPTION);
-        String code = "INTERNAL";
-        if (throwable instanceof DomainException domainException) {
+        if (throwable instanceof StatusException statusException) {
+            status = statusException.getStatus();
+            if (statusException.getTrailers() != null) {
+                trailers.merge(statusException.getTrailers());
+            }
+        } else if (throwable instanceof StatusRuntimeException statusRuntimeException) {
+            status = statusRuntimeException.getStatus();
+            if (statusRuntimeException.getTrailers() != null) {
+                trailers.merge(statusRuntimeException.getTrailers());
+            }
+        } else if (throwable instanceof DomainException domainException) {
             ErrorCode errorCode = domainException.errorCode();
-            code = errorCode.code();
+            trailers.put(ERROR_CODE_KEY, errorCode.code());
             status = Status.fromCode(statusFor(errorCode.category()));
             if (errorCode.category() == ErrorCategory.INTERNAL) {
                 status = status.withDescription(INTERNAL_DESCRIPTION);
@@ -57,14 +80,41 @@ public class ExceptionInterceptor implements ServerInterceptor {
             }
             log.warn("gRPC domain failure: code={}, category={}", errorCode.code(), errorCode.category());
         } else {
+            status = Status.INTERNAL.withDescription(INTERNAL_DESCRIPTION);
+            trailers.put(ERROR_CODE_KEY, "INTERNAL");
             log.error("Unhandled gRPC failure: type={}", throwable.getClass().getName());
         }
-        trailers.put(ERROR_CODE_KEY, code);
         try {
             call.close(status, trailers);
         } catch (IllegalStateException ignored) {
             log.warn("Could not close an already-closed gRPC call");
         }
+    }
+
+    private static Status normalizeStatus(Status status) {
+        if (status == null) {
+            return Status.INTERNAL.withDescription(INTERNAL_DESCRIPTION);
+        }
+        if (status.getCode() == Status.Code.INTERNAL
+                && (status.getDescription() == null || status.getDescription().isBlank()
+                || !INTERNAL_DESCRIPTION.equals(status.getDescription()))) {
+            // Redact unexpected internal detail while preserving intentional contract text.
+            if (status.getDescription() == null || status.getDescription().isBlank()) {
+                return Status.INTERNAL.withDescription(INTERNAL_DESCRIPTION);
+            }
+            if (!INTERNAL_DESCRIPTION.equals(status.getDescription())) {
+                return Status.INTERNAL.withDescription(INTERNAL_DESCRIPTION);
+            }
+        }
+        return status;
+    }
+
+    private static Metadata ensureTrailers(Status status, Metadata trailers) {
+        Metadata out = trailers == null ? new Metadata() : trailers;
+        if (!out.containsKey(ERROR_CODE_KEY) && status != null && status.getCode() == Status.Code.INTERNAL) {
+            out.put(ERROR_CODE_KEY, "INTERNAL");
+        }
+        return out;
     }
 
     private static Status.Code statusFor(ErrorCategory category) {

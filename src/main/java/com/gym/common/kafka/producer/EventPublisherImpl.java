@@ -105,6 +105,7 @@ public class EventPublisherImpl implements EventPublisher {
             throw new IllegalArgumentException("Kafka topic, source, and event ID are required");
         }
         KafkaContract.requireFrozenPair(topic, payload);
+        KafkaContract.requireValid(payload);
         if (kafkaEventProperties.isAutoRegisterSchemas()) {
             throw new IllegalStateException("Production Kafka publishing must disable schema auto-registration");
         }

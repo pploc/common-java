@@ -4,6 +4,8 @@ import com.google.protobuf.Message;
 import com.gym.common.error.EventPublishFailedException;
 import com.gym.common.kafka.config.KafkaEventProperties;
 import com.gym.common.kafka.producer.EventPublisherImpl;
+import com.gym.proto.common.v1.AuthProvider;
+import com.gym.proto.common.v1.Role;
 import com.gym.proto.events.v1.UserRegisteredEvent;
 import io.opentelemetry.api.trace.Span;
 import io.opentelemetry.api.trace.SpanContext;
@@ -37,7 +39,14 @@ import static org.mockito.Mockito.when;
 
 class KafkaAndPublisherTest {
     private static final String TOPIC = "identity.user.registered.v1";
-    private static final UserRegisteredEvent EVENT = UserRegisteredEvent.getDefaultInstance();
+    private static final UserRegisteredEvent EVENT = UserRegisteredEvent.newBuilder()
+            .setUserId("user-001")
+            .setEmail("user-001@example.test")
+            .setFullName("Fixture User")
+            .setRole(Role.ROLE_CUSTOMER)
+            .setAuthProvider(AuthProvider.AUTH_PROVIDER_LOCAL)
+            .setTimestamp(1_700_000_000_123L)
+            .build();
 
     @Test
     void givenFrozenProtobufEvent_whenPublishing_thenAddsCanonicalHeaders() {

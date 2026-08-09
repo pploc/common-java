@@ -48,7 +48,12 @@ public final class ConfluentProtobufRecordDecoder implements RawKafkaDecoder, Au
             throw new PermanentKafkaException("Kafka record decoded to no Protobuf message");
         }
 
-        KafkaContract.requireFrozenPair(record.topic(), message);
+        try {
+            KafkaContract.requireFrozenPair(record.topic(), message);
+            KafkaContract.requireValid(message);
+        } catch (IllegalArgumentException exception) {
+            throw new PermanentKafkaException(exception.getMessage(), exception);
+        }
         if (!eventType.equals(message.getDescriptorForType().getFullName())) {
             throw new PermanentKafkaException("Kafka event-type does not match decoded Protobuf descriptor");
         }

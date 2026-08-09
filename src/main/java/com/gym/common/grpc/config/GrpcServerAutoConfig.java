@@ -33,6 +33,12 @@ public class GrpcServerAutoConfig {
     }
 
     @Bean
+    @org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean
+    public ValidationInterceptor validationInterceptor() {
+        return new ValidationInterceptor();
+    }
+
+    @Bean
     public LoggingInterceptor loggingInterceptor() {
         return new LoggingInterceptor();
     }

@@ -1,11 +1,14 @@
 package com.gym.common.kafka;
 
+import build.buf.protovalidate.ValidationResult;
+import build.buf.protovalidate.Validator;
+import build.buf.protovalidate.exceptions.ValidationException;
 import com.google.protobuf.Message;
 
 import java.util.Map;
 import java.util.Set;
 
-/** Frozen v1 Kafka contract shared by publishing and raw delivery paths. */
+/** Frozen Kafka contract shared by publishing and raw delivery paths. */
 public final class KafkaContract {
     public static final String HEADER_EVENT_TYPE = "event-type";
     public static final String HEADER_SOURCE = "source";
@@ -24,6 +27,7 @@ public final class KafkaContract {
             "identity.user.registered.v1", "events.v1.UserRegisteredEvent",
             "identity.user.suspended.v1", "events.v1.UserSuspendedEvent",
             "identity.user.role-changed.v1", "events.v1.UserRoleChangedEvent",
+            "identity.email.verification-requested.v1", "events.v1.EmailVerificationRequestedEvent",
             "payment.completed.v1", "events.v1.PaymentCompletedEvent",
             "membership.activated.v1", "events.v1.MembershipActivatedEvent",
             "membership.paused.v1", "events.v1.MembershipPausedEvent",
@@ -50,6 +54,8 @@ public final class KafkaContract {
             HEADER_TRACE_ID
     );
 
+    private static final Validator VALIDATOR = new Validator();
+
     private KafkaContract() {
     }
 
@@ -60,9 +66,20 @@ public final class KafkaContract {
         }
     }
 
+    public static void requireValid(Message message) {
+        try {
+            ValidationResult result = VALIDATOR.validate(message);
+            if (!result.isSuccess()) {
+                throw new IllegalArgumentException("Kafka payload failed Protovalidate constraints: " + result);
+            }
+        } catch (ValidationException exception) {
+            throw new IllegalArgumentException("Kafka payload failed Protovalidate constraints", exception);
+        }
+    }
+
     public static String subjectFor(String topic) {
         if (!TOPIC_TYPES.containsKey(topic)) {
-            throw new IllegalArgumentException("Kafka topic is not part of the frozen v1 contract");
+            throw new IllegalArgumentException("Kafka topic is not part of the frozen contract");
         }
         return topic + "-value";
     }

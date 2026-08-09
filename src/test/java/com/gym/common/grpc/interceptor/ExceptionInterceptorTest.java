@@ -111,4 +111,34 @@ class ExceptionInterceptorTest {
 
         verify(call).close(argThat(status -> status.getCode() == Status.Code.INTERNAL), any());
     }
+
+    @Test
+    void given_statusRuntimeExceptionWithTrailers_when_onHalfClose_then_preservesStatusAndTrailers() {
+        // given
+        ExceptionInterceptor interceptor = new ExceptionInterceptor();
+        ServerCall<com.google.protobuf.Empty, com.google.protobuf.Empty> call = mock(ServerCall.class);
+        Metadata trailers = new Metadata();
+        Metadata.Key<String> errorCode =
+                Metadata.Key.of("x-error-code", Metadata.ASCII_STRING_MARSHALLER);
+        trailers.put(errorCode, "DOWNSTREAM_FORBIDDEN");
+        ServerCallHandler<com.google.protobuf.Empty, com.google.protobuf.Empty> next = (c, h) -> new ServerCall.Listener<>() {
+            @Override
+            public void onHalfClose() {
+                throw new StatusRuntimeException(
+                        Status.PERMISSION_DENIED.withDescription("forbidden"),
+                        trailers);
+            }
+        };
+
+        // when
+        ServerCall.Listener<com.google.protobuf.Empty> listener =
+                interceptor.interceptCall(call, new Metadata(), next);
+        listener.onHalfClose();
+
+        // then
+        verify(call).close(
+                argThat(status -> status.getCode() == Status.Code.PERMISSION_DENIED
+                        && "forbidden".equals(status.getDescription())),
+                argThat(md -> "DOWNSTREAM_FORBIDDEN".equals(md.get(errorCode))));
+    }
 }
