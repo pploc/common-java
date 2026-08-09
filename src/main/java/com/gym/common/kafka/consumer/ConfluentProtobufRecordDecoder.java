@@ -17,7 +17,7 @@ import java.util.Objects;
 
 /**
  * Validates frozen record metadata and delegates Protobuf schema resolution to
- * the Confluent 7.7.1 decoder. The original raw frame remains in the result.
+ * the Confluent protobuf decoder. The original raw frame remains in the result.
  */
 public final class ConfluentProtobufRecordDecoder implements RawKafkaDecoder, AutoCloseable {
     private static final int MIN_CONFLUENT_FRAME_BYTES = 6;

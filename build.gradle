@@ -83,8 +83,10 @@ publishing {
 
 configurations.configureEach {
     resolutionStrategy {
-        force 'com.google.protobuf:protobuf-java:4.30.1'
-        force 'com.google.protobuf:protobuf-java-util:4.30.1'
+        // Confluent 8 protobuf provider needs GeneratedFile (protobuf-java ≥ 4.33).
+        // Confluent 7.x is GeneratedMessageV3-era and VerifyError's on protobuf 4.
+        force 'com.google.protobuf:protobuf-java:4.33.5'
+        force 'com.google.protobuf:protobuf-java-util:4.33.5'
     }
 }
 
@@ -93,7 +95,10 @@ dependencies {
 
     api 'org.springframework.boot:spring-boot-starter'
     api 'org.springframework.kafka:spring-kafka'
-    api 'io.confluent:kafka-protobuf-serializer:7.7.1'
+    api('io.confluent:kafka-protobuf-serializer:8.0.7') {
+        exclude group: 'com.google.protobuf', module: 'protobuf-java'
+        exclude group: 'com.google.protobuf', module: 'protobuf-java-util'
+    }
 
     api 'io.grpc:grpc-netty-shaded:1.68.0'
     api 'io.grpc:grpc-core:1.68.0'
@@ -101,11 +106,11 @@ dependencies {
     api 'io.grpc:grpc-protobuf:1.68.0'
     api 'io.grpc:grpc-stub:1.68.0'
     api 'io.grpc:grpc-services:1.68.0'
-    api 'com.google.protobuf:protobuf-java:4.30.1'
-    api 'com.google.protobuf:protobuf-java-util:4.30.1'
+    api 'com.google.protobuf:protobuf-java:4.33.5'
+    api 'com.google.protobuf:protobuf-java-util:4.33.5'
     api 'com.google.api.grpc:proto-google-common-protos:2.22.1'
 
-    api 'com.gym.proto:gym-proto-java:4.0.0'
+    api 'com.gym.proto:gym-proto-java:4.1.0'
     api 'build.buf:protovalidate:0.6.0'
 
     api 'io.opentelemetry:opentelemetry-api:1.43.0'
