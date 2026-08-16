@@ -8,7 +8,7 @@ plugins {
 
 group = 'com.gym'
 
-version = System.getenv('RELEASE_VERSION') ?: '2.1.0-SNAPSHOT'
+version = System.getenv('RELEASE_VERSION') ?: '3.0.0-SNAPSHOT'
 
 java {
     toolchain {
@@ -110,7 +110,7 @@ dependencies {
     api 'com.google.protobuf:protobuf-java-util:4.33.5'
     api 'com.google.api.grpc:proto-google-common-protos:2.22.1'
 
-    api 'com.gym.proto:gym-proto-java:4.1.0'
+    api 'com.gym.proto:gym-proto-java:7.0.2'
     api 'build.buf:protovalidate:0.6.0'
 
     api 'io.opentelemetry:opentelemetry-api:1.43.0'

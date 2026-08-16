@@ -6,6 +6,7 @@ import com.gym.common.kafka.config.KafkaEventProperties;
 import com.gym.common.kafka.producer.EventPublisherImpl;
 import com.gym.proto.common.v1.AuthProvider;
 import com.gym.proto.common.v1.Role;
+import com.gym.proto.events.v1.CheckInRecordedEvent;
 import com.gym.proto.events.v1.UserRegisteredEvent;
 import io.opentelemetry.api.trace.Span;
 import io.opentelemetry.api.trace.SpanContext;
@@ -47,6 +48,16 @@ class KafkaAndPublisherTest {
             .setAuthProvider(AuthProvider.AUTH_PROVIDER_LOCAL)
             .setTimestamp(1_700_000_000_123L)
             .build();
+
+    @Test
+    void givenCheckInTopicAndMessage_whenCheckingFrozenPair_thenAcceptsItsContractEntry() {
+        CheckInRecordedEvent event = CheckInRecordedEvent.getDefaultInstance();
+
+        KafkaContract.requireFrozenPair("checkin.recorded.v1", event);
+
+        assertEquals(11, KafkaContract.TOPIC_TYPES.size());
+        assertEquals("checkin.recorded.v1-value", KafkaContract.subjectFor("checkin.recorded.v1"));
+    }
 
     @Test
     void givenFrozenProtobufEvent_whenPublishing_thenAddsCanonicalHeaders() {

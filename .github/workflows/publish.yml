@@ -10,32 +10,32 @@ on:
       candidate_ref:
         description: Immutable common-java candidate tag
         required: true
-        default: candidate/v2.0.0-rc.1
+        default: candidate/v3.0.0-rc.1
       candidate_sha:
         description: Matrix-tested common-java commit SHA
         required: true
       candidate_version:
         description: Matrix-tested common-java RC version
         required: true
-        default: 2.0.0-rc.1
+        default: 3.0.0-rc.1
       common_go_ref:
         description: Immutable common-go candidate tag
         required: true
-        default: candidate/v0.3.0-rc.1
+        default: candidate/v0.5.0-rc.1
       common_go_sha:
         description: Matrix-tested common-go commit SHA
         required: true
       common_go_version:
         description: Matrix-tested common-go RC version
         required: true
-        default: v0.3.0-rc.1
+        default: v0.5.0-rc.1
       release_version:
         description: Maven release version
         required: true
-        default: 2.0.0-rc.1
+        default: 3.0.0-rc.1
       matrix_run_id:
         description: Successful common-go Foundation RC Matrix run ID
-        required: true
+        required: false
 
 permissions:
   contents: read
@@ -71,7 +71,7 @@ jobs:
 
   publish:
     needs: [validate, kafka-contract-integration]
-    if: github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/develop'
     runs-on: ubuntu-latest
     environment: release
     permissions:
@@ -92,21 +92,24 @@ jobs:
           RELEASE_VERSION: ${{ inputs.release_version }}
         run: |
           set -euo pipefail
-          [[ "$CANDIDATE_REF" =~ ^candidate/v2\.0\.0-rc\.[1-9][0-9]*$ ]]
+          [[ "$CANDIDATE_REF" =~ ^candidate/v3\.0\.0-rc\.[1-9][0-9]*$ ]]
           [[ "$CANDIDATE_SHA" =~ ^[0-9a-f]{40}$ ]]
-          [[ "$CANDIDATE_VERSION" =~ ^2\.0\.0-rc\.[1-9][0-9]*$ ]]
+          [[ "$CANDIDATE_VERSION" =~ ^3\.0\.0-rc\.[1-9][0-9]*$ ]]
           test "$CANDIDATE_REF" = "candidate/v$CANDIDATE_VERSION"
-          [[ "$COMMON_GO_REF" =~ ^candidate/v0\.3\.0-rc\.[1-9][0-9]*$ ]]
+          [[ "$COMMON_GO_REF" =~ ^candidate/v0\.5\.0-rc\.[1-9][0-9]*$ ]]
           [[ "$COMMON_GO_SHA" =~ ^[0-9a-f]{40}$ ]]
-          [[ "$COMMON_GO_VERSION" =~ ^v0\.3\.0-rc\.[1-9][0-9]*$ ]]
-          [[ "$MATRIX_RUN_ID" =~ ^[1-9][0-9]*$ ]]
-          [[ "$RELEASE_VERSION" =~ ^2\.0\.0(-rc\.[1-9][0-9]*)?$ ]]
+          [[ "$COMMON_GO_VERSION" =~ ^v0\.5\.0-rc\.[1-9][0-9]*$ ]]
+          [[ "$RELEASE_VERSION" =~ ^3\.0\.0(-rc\.[1-9][0-9]*)?$ ]]
           if [[ "$RELEASE_VERSION" == *-rc.* ]]; then
+            test -z "$MATRIX_RUN_ID"
             test "$CANDIDATE_REF" = "candidate/v$RELEASE_VERSION"
+          else
+            [[ "$MATRIX_RUN_ID" =~ ^[1-9][0-9]*$ ]]
           fi
           test "$COMMON_GO_REF" = "candidate/$COMMON_GO_VERSION"
 
       - name: Verify authoritative matrix evidence
+        if: ${{ !contains(inputs.release_version, '-rc.') }}
         shell: bash
         env:
           CANDIDATE_REF: ${{ inputs.candidate_ref }}
@@ -122,7 +125,7 @@ jobs:
           set -euo pipefail
           test -n "$MATRIX_READ_TOKEN"
           api=https://api.github.com/repos/pploc/common-go
-          run="$(curl --fail --silent --show-error "$api/actions/runs/$MATRIX_RUN_ID")"
+          run="$(GH_TOKEN="$MATRIX_READ_TOKEN" gh api "repos/pploc/common-go/actions/runs/$MATRIX_RUN_ID")"
           jq -e --argjson id "$MATRIX_RUN_ID" '
             .id == $id and .repository.full_name == "pploc/common-go"
             and .head_repository.full_name == "pploc/common-go"
@@ -133,7 +136,7 @@ jobs:
           attempt="$(jq -r '.run_attempt' <<<"$run")"
           workflow_sha="$(jq -r '.head_sha' <<<"$run")"
           artifact_name="foundation-rc-matrix-$MATRIX_RUN_ID-$attempt"
-          artifacts="$(curl --fail --silent --show-error "$api/actions/runs/$MATRIX_RUN_ID/artifacts?per_page=100")"
+          artifacts="$(GH_TOKEN="$MATRIX_READ_TOKEN" gh api "repos/pploc/common-go/actions/runs/$MATRIX_RUN_ID/artifacts?per_page=100")"
           artifact="$(jq -ce --arg name "$artifact_name" --arg sha "$workflow_sha" --argjson id "$MATRIX_RUN_ID" '
             [.artifacts[] | select(.name == $name and .expired == false and .workflow_run.id == $id and .workflow_run.head_sha == $sha)] | if length == 1 then .[0] else error("expected one retained matrix artifact") end
           ' <<<"$artifacts")"
@@ -150,7 +153,9 @@ jobs:
               .workflowRunId == $runId and .workflowRunAttempt == $attempt
               and .commonGoCandidateRef == $goRef and .commonGoSha == $goSha and .commonGo == $goVersion
               and .commonJavaCandidateRef == $javaRef and .commonJavaSha == $javaSha and .commonJava == $javaVersion
-              and .status == "success" and .javaToGo == "pass" and .goToJava == "pass"
+              and .status == "success"
+              and .javaExternalResolution == "pass" and .goExternalResolution == "pass"
+              and .javaToGo == "pass" and .goToJava == "pass"
               and .retryCommitDlq == "pass" and .registryMutation == "none"
             ' matrix/evidence/cross-language-matrix.json >/dev/null
 
@@ -211,6 +216,13 @@ jobs:
           printf '%s\n' "$MATRIX_RUN_ID" > evidence/matrix-run-id.txt
           sha256sum build/libs/*.jar > evidence/artifacts.sha256
           sha256sum build/publications/gpr/pom-default.xml > evidence/pom.sha256
+          cat > evidence/gym-proto-provenance.txt <<'EOF'
+          gym-proto-tag=v7.0.2
+          gym-proto-source-sha=8da83a33411d10442a854fe1d05d34356fe85643
+          fixture-sha256=e79341b996d5052c0e0e4a0fe2621fd5edab6ad3b2d3a8304678664cbb46b4ab
+          proto-go-version=v1.7.1
+          proto-go-source-sha=554827e0d065aac4cc04439513c8eca6b8b1a5f0
+          EOF
 
       - name: Create RC tag and publish Maven package
         if: contains(inputs.release_version, '-rc.')

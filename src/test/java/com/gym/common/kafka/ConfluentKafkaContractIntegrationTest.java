@@ -115,7 +115,7 @@ class ConfluentKafkaContractIntegrationTest {
     }
 
     @Test
-    void givenSeededV110Registry_whenDecodingImmutableFrames_thenResolvesAllFrozenMessages() {
+    void givenSeededRegistry_whenDecodingImmutableFrames_thenResolvesAllFrozenMessages() {
         for (FixtureCase fixture : fixtures.cases()) {
             RawKafkaRecord raw = fixture.rawRecord();
 

@@ -4,7 +4,7 @@ Shared Java foundations for Gym microservices, built with Java 26 and Spring Boo
 
 ## Status
 
-Published stable line is `com.gym:common-java:2.0.2` (tag `v2.0.2`). `develop` continues as `2.0.0-SNAPSHOT` for unreleased work; consume only published immutable versions in services.
+Published stable line is `com.gym:common-java:2.1.0` (tag `v2.1.0`). `develop` prepares the `3.0.0-SNAPSHOT` contract line; consume only published immutable versions in services.
 
 ## Kafka transport
 
@@ -26,7 +26,7 @@ Use only a published, immutable version:
 
 ```groovy
 dependencies {
-    implementation 'com.gym:common-java:2.0.2'
+    implementation 'com.gym:common-java:2.1.0'
 }
 ```
 
@@ -39,4 +39,4 @@ The package is hosted at `https://maven.pkg.github.com/pploc/common-java`. Devel
 ./gradlew kafkaContractIntegration --no-daemon
 ```
 
-`kafkaContractIntegration` requires a Kafka broker, a Schema Registry, and `GYM_PROTO_FIXTURE_PATH`; the repository workflow provisions Confluent Kafka and Schema Registry 7.7.1, verifies the immutable `gym-proto v1.1.0` fixture, and uploads sanitized evidence.
+`kafkaContractIntegration` requires a Kafka broker, a Schema Registry, and `GYM_PROTO_FIXTURE_PATH`; the repository workflow provisions Confluent Kafka and Schema Registry 7.7.1, verifies all eleven immutable `gym-proto v7.0.2` fixtures, and uploads sanitized evidence.
