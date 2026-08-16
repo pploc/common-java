@@ -140,8 +140,9 @@ jobs:
           curl --fail --silent "$SCHEMA_REGISTRY_URL/subjects" | jq -S . > common-java/evidence/registry-before/subjects.json
           jq -r '.[]' common-java/evidence/registry-before/subjects.json | while read -r subject; do
             encoded_subject="$(jq -rn --arg subject "$subject" '$subject|@uri')"
-            curl --fail --silent "$SCHEMA_REGISTRY_URL/subjects/$encoded_subject/versions" | jq -S . > "common-java/evidence/registry-before/$subject.versions.json"
-            curl --fail --silent "$SCHEMA_REGISTRY_URL/subjects/$encoded_subject/versions/latest" | jq -S '{id,version,schemaType}' > "common-java/evidence/registry-before/$subject.schema.json"
+            subject_key="$(printf '%s' "$subject" | sha256sum | cut -d ' ' -f1)"
+            curl --fail --silent "$SCHEMA_REGISTRY_URL/subjects/$encoded_subject/versions" | jq -S . > "common-java/evidence/registry-before/$subject_key.versions.json"
+            curl --fail --silent "$SCHEMA_REGISTRY_URL/subjects/$encoded_subject/versions/latest" | jq -S '{id,version,schemaType}' > "common-java/evidence/registry-before/$subject_key.schema.json"
           done
 
       - name: Run lookup-only Java Kafka contract suite
@@ -160,8 +161,9 @@ jobs:
           curl --fail --silent "$SCHEMA_REGISTRY_URL/subjects" | jq -S . > common-java/evidence/registry-after/subjects.json
           jq -r '.[]' common-java/evidence/registry-after/subjects.json | while read -r subject; do
             encoded_subject="$(jq -rn --arg subject "$subject" '$subject|@uri')"
-            curl --fail --silent "$SCHEMA_REGISTRY_URL/subjects/$encoded_subject/versions" | jq -S . > "common-java/evidence/registry-after/$subject.versions.json"
-            curl --fail --silent "$SCHEMA_REGISTRY_URL/subjects/$encoded_subject/versions/latest" | jq -S '{id,version,schemaType}' > "common-java/evidence/registry-after/$subject.schema.json"
+            subject_key="$(printf '%s' "$subject" | sha256sum | cut -d ' ' -f1)"
+            curl --fail --silent "$SCHEMA_REGISTRY_URL/subjects/$encoded_subject/versions" | jq -S . > "common-java/evidence/registry-after/$subject_key.versions.json"
+            curl --fail --silent "$SCHEMA_REGISTRY_URL/subjects/$encoded_subject/versions/latest" | jq -S '{id,version,schemaType}' > "common-java/evidence/registry-after/$subject_key.schema.json"
           done
           diff -ru common-java/evidence/registry-before common-java/evidence/registry-after
 
@@ -180,7 +182,8 @@ jobs:
           if [[ -f evidence/schema-registry-subjects.json ]]; then
             jq -r '.[]' evidence/schema-registry-subjects.json | while read -r subject; do
               encoded_subject="$(jq -rn --arg subject "$subject" '$subject|@uri')"
-              curl --fail --silent "$SCHEMA_REGISTRY_URL/config/$encoded_subject" | jq -S . > "evidence/$subject.compatibility.json" || true
+              subject_key="$(printf '%s' "$subject" | sha256sum | cut -d ' ' -f1)"
+              curl --fail --silent "$SCHEMA_REGISTRY_URL/config/$encoded_subject" | jq -S . > "evidence/$subject_key.compatibility.json" || true
             done
           fi
 
