@@ -512,7 +512,7 @@ class ConfluentKafkaContractIntegrationTest {
 
     private static void assertFixtureAuthority(FixtureDocument fixtureDocument) {
         assertEquals(1, fixtureDocument.fixtureFormatVersion());
-        assertEquals("7.7.1", fixtureDocument.generatedBy().schemaRegistryClient());
+        assertEquals("8.0.7", fixtureDocument.generatedBy().schemaRegistryClient());
         assertTrue(fixtureDocument.environment().requireCleanRegistry());
         assertEquals("TopicNameStrategy", fixtureDocument.environment().subjectNameStrategy());
         assertEquals("BACKWARD", fixtureDocument.environment().compatibility());
