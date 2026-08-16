@@ -44,14 +44,14 @@ as `x-service-id` is never trusted independently of the verified peer.
 
 ### Kafka
 
-The initial generation uses the nine `.v1` topics and `<topic>-value` subjects in
+The current generation uses eleven `.v1` topics and `<topic>-value` subjects in
 `gym-proto/contracts/v1/kafka/wire-format.json`, `TopicNameStrategy`, `BACKWARD`
 compatibility, and production `auto.register.schemas=false`. Values are
 Confluent-framed concrete Protobuf messages with no envelope. Canonical headers
 are `event-type`, `source`, `timestamp`, `event-id`, `traceparent`, and optional
 `tracestate`; `x-trace-id` is read-only fallback correlation. New producers emit
 no `x-event-*` headers. Delivery is at-least-once, DLQ topics use `{topic}.DLQ`,
-and the initial Member group is `ms-gym-member-v1`.
+and the default Member group is `ms-gym-member-v2`.
 
 Because Kafka is greenfield, there is no JSON/envelope migration, dual read or
 write, offset conversion, or legacy-topic adapter.

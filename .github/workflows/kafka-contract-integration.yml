@@ -43,9 +43,9 @@ jobs:
       GITHUB_ACTOR: ${{ github.actor }}
       KAFKA_BROKERS: localhost:9092
       SCHEMA_REGISTRY_URL: http://localhost:8081
-      GYM_PROTO_VERSION: v1.1.0
-      GYM_PROTO_SHA: 740e476915117ab594a6e7ee3677e6a2c39c3c80
-      GYM_PROTO_FIXTURE_SHA256: e5a5d0944229c9e0c97dc5e872f01e7597993e5732f2014b7d8e5efdf965a27e
+      GYM_PROTO_VERSION: v7.0.2
+      GYM_PROTO_SHA: 8da83a33411d10442a854fe1d05d34356fe85643
+      GYM_PROTO_FIXTURE_SHA256: e79341b996d5052c0e0e4a0fe2621fd5edab6ad3b2d3a8304678664cbb46b4ab
     steps:
       - uses: actions/checkout@v4
         with:
@@ -55,7 +55,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: pploc/gym-proto
-          ref: v1.1.0
+          ref: v7.0.2
           path: gym-proto
           fetch-depth: 0
 
@@ -112,9 +112,11 @@ jobs:
           PY
           ./gradlew check -PschemaRegistryUrl="$SCHEMA_REGISTRY_URL" --no-daemon
           ./gradlew verifyConfluentBackwardCompatibility -PschemaRegistryUrl="$SCHEMA_REGISTRY_URL" --no-daemon
-          test "$(curl --fail --silent "$SCHEMA_REGISTRY_URL/subjects" | jq length)" -eq 9
-          jq -r '.cases[].subject' contracts/v1/kafka/confluent-7.7.1-fixtures.json | while read -r subject; do
-            test "$(curl --fail --silent "$SCHEMA_REGISTRY_URL/config/$subject" | jq -r '.compatibilityLevel')" = BACKWARD
+          # Protobuf import subjects are registered too; prove each frozen fixture subject instead of a total.
+          jq -r '.cases[].subject' contracts/v1/kafka/confluent-7.7.1-fixtures.json | sort -u | while read -r subject; do
+            encoded_subject="$(jq -rn --arg subject "$subject" '$subject|@uri')"
+            curl --fail --silent "$SCHEMA_REGISTRY_URL/subjects/$encoded_subject/versions/latest" >/dev/null
+            test "$(curl --fail --silent "$SCHEMA_REGISTRY_URL/config/$encoded_subject" | jq -r '.compatibilityLevel')" = BACKWARD
           done
 
       - name: Create immutable fixture topics
@@ -124,8 +126,10 @@ jobs:
           kafka_container="$(docker ps --filter 'ancestor=confluentinc/cp-kafka:7.7.1' --format '{{.ID}}')"
           test -n "$kafka_container"
           jq -r '.cases[].topic' gym-proto/contracts/v1/kafka/confluent-7.7.1-fixtures.json | sort -u | while read -r topic; do
-            docker exec "$kafka_container" kafka-topics --bootstrap-server kafka:29092 \
-              --create --if-not-exists --topic "$topic" --partitions 1 --replication-factor 1
+            for contract_topic in "$topic" "$topic.DLQ"; do
+              docker exec "$kafka_container" kafka-topics --bootstrap-server kafka:29092 \
+                --create --if-not-exists --topic "$contract_topic" --partitions 1 --replication-factor 1
+            done
           done
 
       - name: Snapshot seeded Registry
@@ -136,8 +140,9 @@ jobs:
           curl --fail --silent "$SCHEMA_REGISTRY_URL/subjects" | jq -S . > common-java/evidence/registry-before/subjects.json
           jq -r '.[]' common-java/evidence/registry-before/subjects.json | while read -r subject; do
             encoded_subject="$(jq -rn --arg subject "$subject" '$subject|@uri')"
-            curl --fail --silent "$SCHEMA_REGISTRY_URL/subjects/$encoded_subject/versions" | jq -S . > "common-java/evidence/registry-before/$subject.versions.json"
-            curl --fail --silent "$SCHEMA_REGISTRY_URL/subjects/$encoded_subject/versions/latest" | jq -S '{id,version,schemaType}' > "common-java/evidence/registry-before/$subject.schema.json"
+            subject_key="$(printf '%s' "$subject" | sha256sum | cut -d ' ' -f1)"
+            curl --fail --silent "$SCHEMA_REGISTRY_URL/subjects/$encoded_subject/versions" | jq -S . > "common-java/evidence/registry-before/$subject_key.versions.json"
+            curl --fail --silent "$SCHEMA_REGISTRY_URL/subjects/$encoded_subject/versions/latest" | jq -S '{id,version,schemaType}' > "common-java/evidence/registry-before/$subject_key.schema.json"
           done
 
       - name: Run lookup-only Java Kafka contract suite
@@ -156,8 +161,9 @@ jobs:
           curl --fail --silent "$SCHEMA_REGISTRY_URL/subjects" | jq -S . > common-java/evidence/registry-after/subjects.json
           jq -r '.[]' common-java/evidence/registry-after/subjects.json | while read -r subject; do
             encoded_subject="$(jq -rn --arg subject "$subject" '$subject|@uri')"
-            curl --fail --silent "$SCHEMA_REGISTRY_URL/subjects/$encoded_subject/versions" | jq -S . > "common-java/evidence/registry-after/$subject.versions.json"
-            curl --fail --silent "$SCHEMA_REGISTRY_URL/subjects/$encoded_subject/versions/latest" | jq -S '{id,version,schemaType}' > "common-java/evidence/registry-after/$subject.schema.json"
+            subject_key="$(printf '%s' "$subject" | sha256sum | cut -d ' ' -f1)"
+            curl --fail --silent "$SCHEMA_REGISTRY_URL/subjects/$encoded_subject/versions" | jq -S . > "common-java/evidence/registry-after/$subject_key.versions.json"
+            curl --fail --silent "$SCHEMA_REGISTRY_URL/subjects/$encoded_subject/versions/latest" | jq -S '{id,version,schemaType}' > "common-java/evidence/registry-after/$subject_key.schema.json"
           done
           diff -ru common-java/evidence/registry-before common-java/evidence/registry-after
 
@@ -176,7 +182,8 @@ jobs:
           if [[ -f evidence/schema-registry-subjects.json ]]; then
             jq -r '.[]' evidence/schema-registry-subjects.json | while read -r subject; do
               encoded_subject="$(jq -rn --arg subject "$subject" '$subject|@uri')"
-              curl --fail --silent "$SCHEMA_REGISTRY_URL/config/$encoded_subject" | jq -S . > "evidence/$subject.compatibility.json" || true
+              subject_key="$(printf '%s' "$subject" | sha256sum | cut -d ' ' -f1)"
+              curl --fail --silent "$SCHEMA_REGISTRY_URL/config/$encoded_subject" | jq -S . > "evidence/$subject_key.compatibility.json" || true
             done
           fi
 

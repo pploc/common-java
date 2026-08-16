@@ -113,6 +113,7 @@ class ConfigAndPropertiesTest {
         Map<String, Object> rawConsumerConfig = rawConsumerFactory.getConfigurationProperties();
         assertEquals(ByteArrayDeserializer.class, rawConsumerConfig.get(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG));
         assertEquals(false, rawConsumerConfig.get(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG));
+        assertEquals("ms-gym-member-v2", rawConsumerConfig.get(ConsumerConfig.GROUP_ID_CONFIG));
         assertNotNull(config.rawKafkaListenerContainerFactory(rawConsumerFactory));
     }
 }

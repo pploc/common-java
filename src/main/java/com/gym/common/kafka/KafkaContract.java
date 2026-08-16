@@ -23,17 +23,18 @@ public final class KafkaContract {
     public static final String HEADER_FAILED_AT = "x-failed-at";
     public static final String HEADER_RETRY_COUNT = "x-retry-count";
 
-    public static final Map<String, String> TOPIC_TYPES = Map.of(
-            "identity.user.registered.v1", "events.v1.UserRegisteredEvent",
-            "identity.user.suspended.v1", "events.v1.UserSuspendedEvent",
-            "identity.user.role-changed.v1", "events.v1.UserRoleChangedEvent",
-            "identity.email.verification-requested.v1", "events.v1.EmailVerificationRequestedEvent",
-            "payment.completed.v1", "events.v1.PaymentCompletedEvent",
-            "membership.activated.v1", "events.v1.MembershipActivatedEvent",
-            "membership.paused.v1", "events.v1.MembershipPausedEvent",
-            "membership.resumed.v1", "events.v1.MembershipResumedEvent",
-            "membership.expiring-soon.v1", "events.v1.MembershipExpiringSoonEvent",
-            "membership.expired.v1", "events.v1.MembershipExpiredEvent"
+    public static final Map<String, String> TOPIC_TYPES = Map.ofEntries(
+            Map.entry("identity.user.registered.v1", "events.v1.UserRegisteredEvent"),
+            Map.entry("identity.user.suspended.v1", "events.v1.UserSuspendedEvent"),
+            Map.entry("identity.user.role-changed.v1", "events.v1.UserRoleChangedEvent"),
+            Map.entry("identity.email.verification-requested.v1", "events.v1.EmailVerificationRequestedEvent"),
+            Map.entry("payment.completed.v1", "events.v1.PaymentCompletedEvent"),
+            Map.entry("membership.activated.v1", "events.v1.MembershipActivatedEvent"),
+            Map.entry("membership.paused.v1", "events.v1.MembershipPausedEvent"),
+            Map.entry("membership.resumed.v1", "events.v1.MembershipResumedEvent"),
+            Map.entry("membership.expiring-soon.v1", "events.v1.MembershipExpiringSoonEvent"),
+            Map.entry("membership.expired.v1", "events.v1.MembershipExpiredEvent"),
+            Map.entry("checkin.recorded.v1", "events.v1.CheckInRecordedEvent")
     );
 
     public static final Set<String> REQUIRED_HEADERS = Set.of(

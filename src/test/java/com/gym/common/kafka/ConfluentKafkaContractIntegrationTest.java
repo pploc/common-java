@@ -2,6 +2,7 @@ package com.gym.common.kafka;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.google.protobuf.InvalidProtocolBufferException;
 import com.google.protobuf.Message;
 import com.gym.common.kafka.config.KafkaAutoConfig;
 import com.gym.common.kafka.config.KafkaEventProperties;
@@ -12,6 +13,17 @@ import com.gym.common.kafka.consumer.RawKafkaHeader;
 import com.gym.common.kafka.consumer.RawKafkaListenerAdapter;
 import com.gym.common.kafka.consumer.RawKafkaRecord;
 import com.gym.common.kafka.producer.EventPublisherImpl;
+import com.gym.proto.events.v1.CheckInRecordedEvent;
+import com.gym.proto.events.v1.EmailVerificationRequestedEvent;
+import com.gym.proto.events.v1.MembershipActivatedEvent;
+import com.gym.proto.events.v1.MembershipExpiredEvent;
+import com.gym.proto.events.v1.MembershipExpiringSoonEvent;
+import com.gym.proto.events.v1.MembershipPausedEvent;
+import com.gym.proto.events.v1.MembershipResumedEvent;
+import com.gym.proto.events.v1.PaymentCompletedEvent;
+import com.gym.proto.events.v1.UserRegisteredEvent;
+import com.gym.proto.events.v1.UserRoleChangedEvent;
+import com.gym.proto.events.v1.UserSuspendedEvent;
 import io.opentelemetry.api.trace.Span;
 import io.opentelemetry.api.trace.SpanContext;
 import io.opentelemetry.api.trace.TraceFlags;
@@ -115,7 +127,7 @@ class ConfluentKafkaContractIntegrationTest {
     }
 
     @Test
-    void givenSeededV110Registry_whenDecodingImmutableFrames_thenResolvesAllFrozenMessages() {
+    void givenSeededRegistry_whenDecodingImmutableFrames_thenResolvesAllFrozenMessages() {
         for (FixtureCase fixture : fixtures.cases()) {
             RawKafkaRecord raw = fixture.rawRecord();
 
@@ -133,7 +145,7 @@ class ConfluentKafkaContractIntegrationTest {
     @Test
     void givenLookupOnlyPublisher_whenPublishingImmutableFixtures_thenConsumesExactFramesAndDecodesMessages() {
         for (FixtureCase fixture : fixtures.cases()) {
-            Message message = decoder.decode(fixture.rawRecord()).message();
+            Message message = concreteFixtureMessage(fixture);
             String key = fixture.keyUtf8() + "-contract-" + UUID.randomUUID();
             EventPublisherImpl fixturePublisher = new EventPublisherImpl(
                     kafkaConfig.kafkaTemplate(protobufProducerFactory),
@@ -172,7 +184,7 @@ class ConfluentKafkaContractIntegrationTest {
 
         // When
         for (FixtureCase fixture : fixtures.cases()) {
-            Message message = decoder.decode(fixture.rawRecord()).message();
+            Message message = concreteFixtureMessage(fixture);
             EventPublisherImpl publisher = new EventPublisherImpl(
                     template,
                     fixture.headers().get(KafkaContract.HEADER_SOURCE),
@@ -388,6 +400,27 @@ class ConfluentKafkaContractIntegrationTest {
         return properties;
     }
 
+    private static Message concreteFixtureMessage(FixtureCase fixture) {
+        try {
+            return switch (fixture.eventType()) {
+                case "events.v1.UserRegisteredEvent" -> UserRegisteredEvent.parseFrom(fixture.payload());
+                case "events.v1.UserSuspendedEvent" -> UserSuspendedEvent.parseFrom(fixture.payload());
+                case "events.v1.UserRoleChangedEvent" -> UserRoleChangedEvent.parseFrom(fixture.payload());
+                case "events.v1.EmailVerificationRequestedEvent" -> EmailVerificationRequestedEvent.parseFrom(fixture.payload());
+                case "events.v1.PaymentCompletedEvent" -> PaymentCompletedEvent.parseFrom(fixture.payload());
+                case "events.v1.MembershipActivatedEvent" -> MembershipActivatedEvent.parseFrom(fixture.payload());
+                case "events.v1.MembershipPausedEvent" -> MembershipPausedEvent.parseFrom(fixture.payload());
+                case "events.v1.MembershipResumedEvent" -> MembershipResumedEvent.parseFrom(fixture.payload());
+                case "events.v1.MembershipExpiringSoonEvent" -> MembershipExpiringSoonEvent.parseFrom(fixture.payload());
+                case "events.v1.MembershipExpiredEvent" -> MembershipExpiredEvent.parseFrom(fixture.payload());
+                case "events.v1.CheckInRecordedEvent" -> CheckInRecordedEvent.parseFrom(fixture.payload());
+                default -> throw new AssertionError("unsupported frozen fixture event type: " + fixture.eventType());
+            };
+        } catch (InvalidProtocolBufferException exception) {
+            throw new AssertionError("parse frozen fixture payload", exception);
+        }
+    }
+
     private void publishWithFixtureTrace(FixtureCase fixture, EventPublisherImpl fixturePublisher, String key, Message message) {
         String[] parts = fixture.headers().get(KafkaContract.HEADER_TRACEPARENT).split("-");
         TraceStateBuilder traceState = TraceState.builder();
@@ -512,7 +545,7 @@ class ConfluentKafkaContractIntegrationTest {
 
     private static void assertFixtureAuthority(FixtureDocument fixtureDocument) {
         assertEquals(1, fixtureDocument.fixtureFormatVersion());
-        assertEquals("7.7.1", fixtureDocument.generatedBy().schemaRegistryClient());
+        assertEquals("8.0.7", fixtureDocument.generatedBy().schemaRegistryClient());
         assertTrue(fixtureDocument.environment().requireCleanRegistry());
         assertEquals("TopicNameStrategy", fixtureDocument.environment().subjectNameStrategy());
         assertEquals("BACKWARD", fixtureDocument.environment().compatibility());
